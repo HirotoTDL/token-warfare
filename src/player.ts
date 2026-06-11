@@ -72,6 +72,8 @@ export class PlayerCommander implements Unit {
   private vmKick = 0
   private deployRay = new THREE.Raycaster()
   private energyWarned = false
+  private shakeT = 0
+  private shakeAmp = 0
 
   constructor(
     world: World, combat: Combat, sfx: Sfx, input: Input,
@@ -203,6 +205,13 @@ export class PlayerCommander implements Unit {
     const bob = Math.sin(this.bobT) * 0.035 * (moving && this.onGround ? 1 : 0)
     this.camera.position.set(this.pos.x, this.pos.y + EYE + bob, this.pos.z)
     this.camera.rotation.set(this.pitch, this.yaw, 0)
+    // 被弾カメラシェイク
+    if (this.shakeT > 0) {
+      this.shakeT -= dt
+      const k = this.shakeAmp * (this.shakeT / 0.18)
+      this.camera.rotation.x += (Math.random() - 0.5) * k
+      this.camera.rotation.z += (Math.random() - 0.5) * k * 0.6
+    }
     const targetFov = zoomed ? w.zoomFov : 75
     if (Math.abs(this.camera.fov - targetFov) > 0.05) {
       this.camera.fov += (targetFov - this.camera.fov) * Math.min(1, dt * 14)
@@ -460,6 +469,8 @@ export class PlayerCommander implements Unit {
     if (this.armorT > 0) d *= 0.2
     this.hp -= d
     this.regenDelay = 6
+    this.shakeT = 0.18
+    this.shakeAmp = Math.min(0.035, 0.008 + d * 0.0009)
     this.onDamaged?.(d)
     this.sfx.damaged()
     if (this.hp <= 0) {

@@ -80,12 +80,13 @@ export class HUD {
       </div>
       <div id="h-feed"></div>
       <div id="h-msg"></div>
+      <div id="h-killbanner"></div>
       <div id="h-minimap-slot"></div>
     `
     const ids = ['h-score-blue', 'h-score-red', 'h-timer', 'h-ot', 'h-warn', 'h-hp', 'h-hp-fill',
       'h-en-fill', 'h-en-state', 'h-skill', 'h-skill-cd', 'h-momentum',
       'h-tp-fill', 'h-tp', 'h-slots', 'h-feed', 'h-msg', 'h-crosshair', 'h-hitmarker',
-      'h-vignette', 'h-stealth', 'h-dead', 'h-dead-count', 'h-minimap-slot']
+      'h-vignette', 'h-stealth', 'h-dead', 'h-dead-count', 'h-minimap-slot', 'h-killbanner']
     for (const id of ids) this.els[id] = root.querySelector(`#${id}`) as HTMLElement
     this.els['h-minimap-slot'].appendChild(this.minimap.canvas)
 
@@ -176,6 +177,16 @@ export class HUD {
     el.textContent = text
     el.classList.add('show')
     this.warnTimer = sec
+  }
+
+  /** 撃破/被撃破の大型バナー */
+  killBanner(text: string, good: boolean) {
+    const el = this.els['h-killbanner']
+    el.textContent = text
+    el.className = good ? 'good' : 'bad'
+    el.classList.remove('pop')
+    void el.offsetWidth
+    el.classList.add('pop')
   }
 
   hitmarker() {

@@ -286,6 +286,23 @@ body {
 }
 .feed-line.fade { opacity: 0; }
 
+/* 撃破バナー */
+#h-killbanner {
+  position: absolute; left: 50%; top: 34%; transform: translateX(-50%);
+  font-size: 54px; font-weight: 900; letter-spacing: 0.18em;
+  opacity: 0; pointer-events: none;
+  text-shadow: 0 0 26px rgba(0, 0, 0, 0.8);
+}
+#h-killbanner.good { color: #ffd866; }
+#h-killbanner.bad { color: #ff6a5a; }
+#h-killbanner.pop { animation: kbanner 1.5s ease-out; }
+@keyframes kbanner {
+  0% { opacity: 0; transform: translateX(-50%) scale(1.7); }
+  12% { opacity: 1; transform: translateX(-50%) scale(1); }
+  75% { opacity: 1; }
+  100% { opacity: 0; transform: translateX(-50%) scale(0.96); }
+}
+
 /* ===== 設定パネル ===== */
 .settings-panel {
   background: var(--panel); border: 1px solid var(--panel-line); border-radius: 8px;

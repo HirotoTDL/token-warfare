@@ -147,6 +147,7 @@ class BattleView implements View {
   private overtimeAnnounced = false
   private suddenDeath = false
   private endTimer = -1
+  private hitstopT = 0
 
   constructor(public config: MatchConfig, private onEnd: (scores: Record<Team, number>) => void) {
     this.arena = buildArena(this.world)
@@ -183,8 +184,10 @@ class BattleView implements View {
         const scorer = victim.team === 'red' ? 'blue' : 'red'
         this.scores[scorer]++
         sfx.kill()
+        this.hitstopT = 0.4 // ヒットストップ(一瞬のスロー演出)
+        this.hud.killBanner(victim.team === 'red' ? '敵将撃破!!' : 'やられた…', victim.team === 'red')
         this.hud.feed(victim.team === 'red' ? `敵将${victim.name}を撃破!` : `${victim.name}、討たれる…`)
-        this.hud.warn(victim.team === 'red' ? `敵将撃破! ${this.scores.blue} - ${this.scores.red}` : `被撃破… ${this.scores.blue} - ${this.scores.red}`, 2)
+        this.hud.warn(`${this.scores.blue} - ${this.scores.red}`, 2)
         if (this.suddenDeath) {
           // サドンデス: 次の撃破で即決着
           this.finish()
@@ -330,8 +333,17 @@ class BattleView implements View {
         const next = t - dt
         if (next <= 0) {
           delete this.respawnT[team]
-          if (team === 'blue') this.player.respawn(this.world.basePos.blue, RESPAWN_INVULN)
-          else this.bot.respawn(this.world.basePos.red, RESPAWN_INVULN)
+          const base = this.world.basePos[team]
+          if (team === 'blue') {
+            this.player.respawn(base, RESPAWN_INVULN)
+            this.hud.message(`リスポーン — ${RESPAWN_INVULN}秒無敵`, 2)
+          } else {
+            this.bot.respawn(base, RESPAWN_INVULN)
+          }
+          // ワープイン演出
+          this.fx.column(base.clone(), team === 'blue' ? 0x4db8ff : 0xff6a5a)
+          this.fx.ring(base.clone(), team === 'blue' ? 0x4db8ff : 0xff6a5a)
+          sfx.deploy()
         } else {
           this.respawnT[team] = next
         }
@@ -344,9 +356,12 @@ class BattleView implements View {
       }
     }
 
-    for (const u of [...this.world.units]) u.update(dt)
-    this.fx.update(dt)
-    this.combat.update(dt)
+    // ヒットストップ中はゲーム世界だけスローになる
+    const udt = this.hitstopT > 0 ? dt * 0.25 : dt
+    this.hitstopT = Math.max(0, this.hitstopT - dt)
+    for (const u of [...this.world.units]) u.update(udt)
+    this.fx.update(udt)
+    this.combat.update(udt)
 
     if (!this.over) {
       this.hud.update(

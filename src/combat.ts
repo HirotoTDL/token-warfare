@@ -65,6 +65,19 @@ export class Effects {
     this.push(m, 0.45, geo, 3.4)
   }
 
+  /** リスポーン/ワープ演出の光柱 */
+  column(pos: THREE.Vector3, color: number) {
+    const geo = new THREE.CylinderGeometry(0.7, 0.9, 7, 16, 1, true)
+    const mat = new THREE.MeshBasicMaterial({
+      color, transparent: true, opacity: 0.55, blending: THREE.AdditiveBlending,
+      depthWrite: false, side: THREE.DoubleSide,
+    })
+    const m = new THREE.Mesh(geo, mat)
+    m.position.copy(pos)
+    m.position.y += 3.5
+    this.push(m, 0.7, geo)
+  }
+
   explosion(pos: THREE.Vector3, radius: number, color = 0xff8830) {
     const geo = new THREE.SphereGeometry(1, 16, 12)
     const mat = new THREE.MeshBasicMaterial({
