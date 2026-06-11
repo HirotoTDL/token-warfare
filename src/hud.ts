@@ -17,6 +17,7 @@ export interface HudState {
   scoreRed: number
   momentum: boolean
   overtime: boolean
+  suddenDeath: boolean
   deadCountdown: number | null
   slots: { def: TokenDef; count: number; affordable: boolean }[]
 }
@@ -113,7 +114,8 @@ export class HUD {
       this.els['h-timer'].textContent = timerText
     }
     this.els['h-timer'].classList.toggle('urgent', t < 30)
-    this.els['h-ot'].classList.toggle('show', s.overtime)
+    this.els['h-ot'].textContent = s.suddenDeath ? 'SUDDEN DEATH' : 'OVERTIME'
+    this.els['h-ot'].classList.toggle('show', s.overtime || s.suddenDeath)
 
     this.els['h-hp'].textContent = `${Math.ceil(Math.max(0, s.hp))}`
     const hpFrac = Math.max(0, s.hp / s.maxHp)

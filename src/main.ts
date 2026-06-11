@@ -132,6 +132,7 @@ class BattleView implements View {
   private t = 0
   private coreSpawnT = 4
   private overtimeAnnounced = false
+  private suddenDeath = false
   private endTimer = -1
 
   constructor(public config: MatchConfig, private onEnd: (scores: Record<Team, number>) => void) {
@@ -171,6 +172,11 @@ class BattleView implements View {
         sfx.kill()
         this.hud.feed(victim.team === 'red' ? `敵将${victim.name}を撃破!` : `${victim.name}、討たれる…`)
         this.hud.warn(victim.team === 'red' ? `敵将撃破! ${this.scores.blue} - ${this.scores.red}` : `被撃破… ${this.scores.blue} - ${this.scores.red}`, 2)
+        if (this.suddenDeath) {
+          // サドンデス: 次の撃破で即決着
+          this.finish()
+          return
+        }
         const rt = this.timer <= OVERTIME_AT ? RESPAWN_TIME_OT : RESPAWN_TIME
         this.respawnT[victim.team] = rt
         return
@@ -278,8 +284,17 @@ class BattleView implements View {
     if (!this.over) {
       this.timer -= dt
       if (this.timer <= 0) {
-        this.timer = 0
-        this.finish()
+        if (!this.suddenDeath && this.scores.blue === this.scores.red) {
+          // 同点ならサドンデス(45秒・次の撃破で決着。決着しなければDRAW)
+          this.suddenDeath = true
+          this.timer = 45
+          this.hud.warn('🔥 SUDDEN DEATH — 次の撃破で決着!', 4)
+          sfx.overtime()
+          bgm.play('overtime')
+        } else {
+          this.timer = 0
+          this.finish()
+        }
       }
       // オーバータイム告知
       if (!this.overtimeAnnounced && this.timer <= OVERTIME_AT) {
@@ -336,7 +351,8 @@ class BattleView implements View {
           scoreBlue: this.scores.blue,
           scoreRed: this.scores.red,
           momentum: this.player.tpRegenMul > (this.timer <= OVERTIME_AT ? 2 : 1),
-          overtime: this.timer <= OVERTIME_AT,
+          overtime: this.timer <= OVERTIME_AT && !this.suddenDeath,
+          suddenDeath: this.suddenDeath,
           deadCountdown: this.respawnT.blue ?? null,
           slots: this.player.loadout.map((k) => ({
             def: TOKENS[k],
