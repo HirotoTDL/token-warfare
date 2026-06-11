@@ -17,6 +17,7 @@ import { BotCommander, botParams } from './bot'
 import { HUD } from './hud'
 import { TOKENS } from './tokens'
 import { buildCore } from './models'
+import { preloadModels, MODEL_MANIFEST } from './modelLoader'
 
 // --- 基盤 ---
 const app = document.getElementById('app')!
@@ -33,6 +34,7 @@ const input = new Input(renderer.domElement)
 const sfx = new Sfx()
 const bgm = new Bgm()
 bgm.play('title') // 最初のクリックで解禁されるまで保留される
+preloadModels(MODEL_MANIFEST) // public/models/*.glb があれば自動採用
 
 const hudRoot = document.getElementById('hud')!
 const screens = {

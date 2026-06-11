@@ -7,6 +7,12 @@ import {
   buildGunner, buildSentry, buildHealDrone, buildStriker, buildSpiderMine,
   buildWall, buildBooster, buildChaser, buildBomber, buildJammer, buildSniperDrone, buildDecoy,
 } from './models'
+import { getModel } from './modelLoader'
+
+/** GLB(外部生成モデル)があれば優先、無ければプロシージャル */
+function resolveModel(key: string, team: Team, fallback: () => THREE.Group): THREE.Group {
+  return getModel(key, team) ?? fallback()
+}
 
 export interface TokenDef {
   key: string
@@ -202,7 +208,7 @@ class GunnerUnit extends TokenUnit {
   private bobT = Math.random() * 6
 
   constructor(world: World, combat: Combat, sfx: Sfx, team: Team, pos: THREE.Vector3) {
-    super(world, combat, sfx, team, 'gunner', 'ガンナー', buildGunner(team), pos, 60, 0.4, 1.3)
+    super(world, combat, sfx, team, 'gunner', 'ガンナー', resolveModel('token_gunner', team, () => buildGunner(team)), pos, 60, 0.4, 1.3)
   }
 
   update(dt: number) {
@@ -258,8 +264,9 @@ class SentryUnit extends TokenUnit {
   private fireCd = 0
 
   constructor(world: World, combat: Combat, sfx: Sfx, team: Team, pos: THREE.Vector3) {
-    super(world, combat, sfx, team, 'sentry', 'セントリー', buildSentry(team), pos, 120, 0.55, 1.25)
-    this.head = this.group.userData.head as THREE.Object3D
+    super(world, combat, sfx, team, 'sentry', 'セントリー', resolveModel('token_sentry', team, () => buildSentry(team)), pos, 120, 0.55, 1.25)
+    // GLBモデルにはヘッドが無いため、その場合は本体ごと旋回する
+    this.head = (this.group.userData.head as THREE.Object3D) ?? this.group
   }
 
   update(dt: number) {
@@ -301,7 +308,7 @@ class HealDroneUnit extends TokenUnit {
   private orbitT = Math.random() * 6
 
   constructor(world: World, combat: Combat, sfx: Sfx, team: Team, pos: THREE.Vector3) {
-    super(world, combat, sfx, team, 'healer', 'ヒールドローン', buildHealDrone(team), pos, 40, 0.35, 0.6)
+    super(world, combat, sfx, team, 'healer', 'ヒールドローン', resolveModel('token_healer', team, () => buildHealDrone(team)), pos, 40, 0.35, 0.6)
     this.group.position.y = 2.0
   }
 
@@ -340,7 +347,7 @@ class StrikerUnit extends TokenUnit {
   private target: Unit | null = null
 
   constructor(world: World, combat: Combat, sfx: Sfx, team: Team, pos: THREE.Vector3) {
-    super(world, combat, sfx, team, 'striker', 'ストライカー', buildStriker(team), pos, 50, 0.4, 0.6)
+    super(world, combat, sfx, team, 'striker', 'ストライカー', resolveModel('token_striker', team, () => buildStriker(team)), pos, 50, 0.4, 0.6)
   }
 
   update(dt: number) {
@@ -372,7 +379,7 @@ class SpiderMineUnit extends TokenUnit {
   private lamp: THREE.MeshStandardMaterial | null
 
   constructor(world: World, combat: Combat, sfx: Sfx, team: Team, pos: THREE.Vector3) {
-    super(world, combat, sfx, team, 'mine', 'スパイダーマイン', buildSpiderMine(team), pos, 30, 0.3, 0.5)
+    super(world, combat, sfx, team, 'mine', 'スパイダーマイン', resolveModel('token_mine', team, () => buildSpiderMine(team)), pos, 30, 0.3, 0.5)
     this.lamp = (this.group.userData.lamp as THREE.MeshStandardMaterial) ?? null
   }
 
@@ -454,7 +461,7 @@ class BoosterUnit extends TokenUnit {
   private pulseT = 0
 
   constructor(world: World, combat: Combat, sfx: Sfx, team: Team, pos: THREE.Vector3) {
-    super(world, combat, sfx, team, 'booster', 'ブースターパイロン', buildBooster(team), pos, 80, 0.45, 1.2)
+    super(world, combat, sfx, team, 'booster', 'ブースターパイロン', resolveModel('token_booster', team, () => buildBooster(team)), pos, 80, 0.45, 1.2)
     this.crystal = (this.group.userData.crystal as THREE.Object3D) ?? null
   }
 
@@ -476,7 +483,7 @@ class BoosterUnit extends TokenUnit {
 /** チェイサー: 敵将を高速追跡。接触で小ダメージ+敵将を5秒マップ表示 */
 class ChaserUnit extends TokenUnit {
   constructor(world: World, combat: Combat, sfx: Sfx, team: Team, pos: THREE.Vector3) {
-    super(world, combat, sfx, team, 'chaser', 'チェイサー', buildChaser(team), pos, 45, 0.35, 0.7)
+    super(world, combat, sfx, team, 'chaser', 'チェイサー', resolveModel('token_chaser', team, () => buildChaser(team)), pos, 45, 0.35, 0.7)
   }
 
   update(dt: number) {
@@ -505,7 +512,7 @@ class BomberUnit extends TokenUnit {
   private target: Unit | null = null
 
   constructor(world: World, combat: Combat, sfx: Sfx, team: Team, pos: THREE.Vector3) {
-    super(world, combat, sfx, team, 'bomber', 'ボムスリンガー', buildBomber(team), pos, 90, 0.5, 1.0)
+    super(world, combat, sfx, team, 'bomber', 'ボムスリンガー', resolveModel('token_bomber', team, () => buildBomber(team)), pos, 90, 0.5, 1.0)
   }
 
   update(dt: number) {
@@ -561,7 +568,7 @@ class BomberUnit extends TokenUnit {
 /** ジャマーポッド: 半径9mの敵索敵を妨害(world.senseRangeMul経由) */
 class JammerUnit extends TokenUnit {
   constructor(world: World, combat: Combat, sfx: Sfx, team: Team, pos: THREE.Vector3) {
-    super(world, combat, sfx, team, 'jammer', 'ジャマーポッド', buildJammer(team), pos, 70, 0.4, 1.1)
+    super(world, combat, sfx, team, 'jammer', 'ジャマーポッド', resolveModel('token_jammer', team, () => buildJammer(team)), pos, 70, 0.4, 1.1)
   }
 
   update(dt: number) {
@@ -579,7 +586,7 @@ class SniperDroneUnit extends TokenUnit {
   private home: THREE.Vector3
 
   constructor(world: World, combat: Combat, sfx: Sfx, team: Team, pos: THREE.Vector3) {
-    super(world, combat, sfx, team, 'sniperdrone', 'スナイパードローン', buildSniperDrone(team), pos, 35, 0.35, 0.6)
+    super(world, combat, sfx, team, 'sniperdrone', 'スナイパードローン', resolveModel('token_sniperdrone', team, () => buildSniperDrone(team)), pos, 35, 0.35, 0.6)
     this.home = pos.clone()
     this.group.position.y = 3.2
   }
@@ -616,7 +623,7 @@ export class DecoyUnit extends TokenUnit {
   private lifeT = 6
 
   constructor(world: World, combat: Combat, sfx: Sfx, team: Team, pos: THREE.Vector3, char: CharacterDef, yaw: number) {
-    super(world, combat, sfx, team, 'decoy', 'デコイ', buildDecoy(char, team), pos, 60, 0.45, 1.8)
+    super(world, combat, sfx, team, 'decoy', 'デコイ', resolveModel(`char_${char.key}`, team, () => buildDecoy(char, team)), pos, 60, 0.45, 1.8)
     this.group.rotation.y = yaw
   }
 

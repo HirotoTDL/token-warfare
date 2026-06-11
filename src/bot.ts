@@ -5,6 +5,7 @@ import { Sfx } from './sfx'
 import { TEAM_COLOR, ENERGY_MAX, TP_REGEN_BASE, enemyOf, type CharacterDef, type Team, type Unit } from './types'
 import { TOKENS, DecoyUnit, loadoutFor } from './tokens'
 import { buildMonsterCommander } from './models'
+import { getModel } from './modelLoader'
 
 function flatDist(a: THREE.Vector3, b: THREE.Vector3) {
   const dx = a.x - b.x
@@ -122,7 +123,7 @@ export class BotCommander implements Unit {
     this.id = world.allocId()
     this.name = char.name
     this.hp = this.maxHp = char.hp
-    this.group = buildMonsterCommander(char, 'red')
+    this.group = getModel(`char_${char.key}`, 'red') ?? buildMonsterCommander(char, 'red')
     this.group.position.copy(spawn)
     this.group.rotation.y = Math.atan2(-spawn.x, -spawn.z)
     this.muzzle = this.group.userData.muzzle as THREE.Object3D
