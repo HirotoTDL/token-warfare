@@ -156,7 +156,7 @@ export const CHARACTERS: CharacterDef[] = [
     hp: 100, color: 0xff4fa3, subColor: 0xffe2f1, variant: 4,
     weapon: {
       name: 'ツインポッパー', desc: '2丁同時発射の近距離ポッパー',
-      damage: 5, pellets: 2, rate: 9, energyCost: 2.6, boltSpeed: 105,
+      damage: 4.6, pellets: 2, rate: 9, energyCost: 2.6, boltSpeed: 105,
       falloff: [{ d: 0, mul: 1.25 }, { d: 6, mul: 1.1 }, { d: 16, mul: 0.7 }, { d: 35, mul: 0.4 }],
       spread: 0.045, zoomFov: 55, recoil: 0.008, auto: true, boltColor: 0xff8fd0,
     },

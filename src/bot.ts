@@ -48,7 +48,7 @@ export function botParams(level: number): BotParams {
     deployMin: lerp(14, 5, t),
     deployMax: lerp(19, 8, t),
     dmgMul: lerp(0.5, 1.05, t),
-    burstPause: lerp(1.7, 0.55, t),
+    burstPause: lerp(1.8, 0.7, t),
     lead: lv >= 7,
     tpMul: lerp(0.6, 1.2, t),
     coreSeek: lv >= 3,

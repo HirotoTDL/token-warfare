@@ -4,6 +4,7 @@ import { buildArena } from './arena'
 import { createSky } from './sky'
 import { Effects, Combat } from './combat'
 import { Sfx } from './sfx'
+import { Bgm } from './bgm'
 import { Input } from './input'
 import {
   CHARACTERS, TEAM_NAME, characterByKey,
@@ -30,6 +31,8 @@ app.appendChild(renderer.domElement)
 
 const input = new Input(renderer.domElement)
 const sfx = new Sfx()
+const bgm = new Bgm()
+bgm.play('title') // 最初のクリックで解禁されるまで保留される
 
 const hudRoot = document.getElementById('hud')!
 const screens = {
@@ -259,6 +262,7 @@ class BattleView implements View {
     this.over = true
     this.endTimer = 1.2
     sfx.sting(this.scores.blue >= this.scores.red)
+    bgm.jingle(this.scores.blue === this.scores.red ? 'draw' : this.scores.blue > this.scores.red ? 'win' : 'lose')
     input.exitLock()
   }
 
@@ -282,6 +286,7 @@ class BattleView implements View {
         this.overtimeAnnounced = true
         this.hud.warn('⚡ OVERTIME — TP回復2倍・コア増加!', 3)
         sfx.overtime()
+        bgm.play('overtime')
       }
       // モメンタム(ビハインド側のTP回復ブースト)+ OT全体ブースト
       const otMul = this.timer <= OVERTIME_AT ? 2 : 1
@@ -401,6 +406,7 @@ function startBattle(charKey: string) {
   view = battle
   showScreen(null)
   resumeOverlay.classList.add('hidden')
+  bgm.play(Math.random() < 0.5 ? 'battle_a' : 'battle_b')
   input.requestLock()
 }
 
@@ -409,6 +415,7 @@ function backToMenu(target: 'title' | 'mode' | 'select') {
   battle = null
   view = new MenuView()
   showScreen(target)
+  bgm.play(target === 'title' ? 'title' : 'select')
 }
 
 // モード選択
@@ -460,6 +467,8 @@ for (const c of CHARACTERS) {
 
 document.getElementById('btn-start')!.addEventListener('click', () => {
   sfx.unlock()
+  bgm.unlock()
+  bgm.play('select')
   showScreen('mode')
 })
 document.getElementById('btn-rematch')!.addEventListener('click', () => {
@@ -495,6 +504,7 @@ window.addEventListener('resize', () => {
   },
   TOKENS,
   sfx,
+  bgm,
 }
 
 // --- メインループ ---
