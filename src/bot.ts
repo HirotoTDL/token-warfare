@@ -203,6 +203,7 @@ export class BotCommander implements Unit {
     else this.hp = Math.min(this.maxHp, this.hp + 8 * dt)
     this.tp = Math.min(100, this.tp + TP_REGEN_BASE * this.params.tpMul * this.tpRegenMul * dt)
 
+    this.updateWalkAnim(dt)
     this.group.updateMatrixWorld()
   }
 
@@ -398,6 +399,31 @@ export class BotCommander implements Unit {
 
   private bobWalk(speed: number) {
     this.group.position.y = Math.abs(Math.sin(this.walkT * speed * 1.8)) * 0.06
+  }
+
+  private animPrev: THREE.Vector3 | null = null
+  private animT = Math.random() * 6
+  private animAmp = 0
+
+  /** 移動速度に応じた歩行アニメ */
+  private updateWalkAnim(dt: number) {
+    const anim = this.group.userData.anim as { legs: THREE.Group[]; arms: THREE.Group[] } | undefined
+    if (!anim) return
+    const p = this.group.position
+    if (!this.animPrev) this.animPrev = p.clone()
+    const dx = p.x - this.animPrev.x
+    const dz = p.z - this.animPrev.z
+    const speed = Math.sqrt(dx * dx + dz * dz) / Math.max(dt, 1e-3)
+    this.animPrev.set(p.x, p.y, p.z)
+    const targetAmp = Math.min(1, speed / 3.2)
+    this.animAmp += (targetAmp - this.animAmp) * Math.min(1, dt * 10)
+    this.animT += dt * (5 + speed * 2.0)
+    anim.legs.forEach((leg, i) => {
+      leg.rotation.x = Math.sin(this.animT + (i % 2) * Math.PI) * 0.7 * this.animAmp
+    })
+    anim.arms.forEach((arm, i) => {
+      arm.rotation.x = Math.sin(this.animT + (i % 2) * Math.PI) * 0.5 * this.animAmp
+    })
   }
 
   private collide() {

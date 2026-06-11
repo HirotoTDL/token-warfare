@@ -116,6 +116,32 @@ export abstract class TokenUnit implements Unit {
     }
   }
 
+  private animPrev: THREE.Vector3 | null = null
+  private animT = Math.random() * 6
+  private animAmp = 0
+
+  /** 移動速度に応じた歩行アニメ(モデルにanim情報がある場合のみ) */
+  protected updateWalkAnim(dt: number) {
+    const anim = this.group.userData.anim as { legs: THREE.Group[]; arms: THREE.Group[] } | undefined
+    if (!anim) return
+    const p = this.group.position
+    if (!this.animPrev) this.animPrev = p.clone()
+    const dx = p.x - this.animPrev.x
+    const dz = p.z - this.animPrev.z
+    const speed = Math.sqrt(dx * dx + dz * dz) / Math.max(dt, 1e-3)
+    this.animPrev.set(p.x, p.y, p.z)
+    const targetAmp = Math.min(1, speed / 3)
+    this.animAmp += (targetAmp - this.animAmp) * Math.min(1, dt * 10)
+    this.animT += dt * (5 + speed * 2.0)
+    anim.legs.forEach((leg, i) => {
+      const phase = ((i + (i >> 1)) % 2) * Math.PI // 2脚=交互 / 4脚=対角トロット
+      leg.rotation.x = Math.sin(this.animT + phase) * 0.7 * this.animAmp
+    })
+    anim.arms.forEach((arm, i) => {
+      arm.rotation.x = Math.sin(this.animT + Math.PI + (i % 2) * Math.PI) * 0.5 * this.animAmp
+    })
+  }
+
   protected faceDir(dir: THREE.Vector3, dt: number) {
     const yaw = Math.atan2(dir.x, dir.z)
     this.group.rotation.y = lerpAngle(this.group.rotation.y, yaw, dt * 9)
@@ -253,6 +279,7 @@ class GunnerUnit extends TokenUnit {
       }
     }
     this.group.position.y = Math.abs(Math.sin(this.bobT * 7)) * 0.02
+    this.updateWalkAnim(dt)
     this.group.updateMatrixWorld()
   }
 }
@@ -482,6 +509,10 @@ class BoosterUnit extends TokenUnit {
 
 /** チェイサー: 敵将を高速追跡。接触で小ダメージ+敵将を5秒マップ表示 */
 class ChaserUnit extends TokenUnit {
+  private path: THREE.Vector3[] | null = null
+  private pi = 0
+  private pathT = 0
+
   constructor(world: World, combat: Combat, sfx: Sfx, team: Team, pos: THREE.Vector3) {
     super(world, combat, sfx, team, 'chaser', 'チェイサー', resolveModel('token_chaser', team, () => buildChaser(team)), pos, 45, 0.35, 0.7)
   }
@@ -490,9 +521,24 @@ class ChaserUnit extends TokenUnit {
     this.updateFlash(dt)
     const prey = this.world.commanderOf(enemyOf(this.team))
     if (prey && prey.alive) {
-      this.moveToward(prey.group.position, 8.2, dt)
+      const dist = flatDist(prey.group.position, this.group.position)
+      // 障害物に引っかからないよう経路追従(獲物が動くので高頻度で再計算)
+      this.pathT -= dt
+      if (!this.path || this.pathT <= 0) {
+        this.path = this.world.nav.findPath(this.group.position, prey.group.position)
+        this.pi = 0
+        this.pathT = 1.2
+      }
+      if (dist < 6 || !this.path) {
+        // 至近距離は直進
+        this.moveToward(prey.group.position, 8.2, dt)
+      } else if (this.pi < this.path.length) {
+        const wp = this.path[this.pi]
+        if (flatDist(wp, this.group.position) < 0.9) this.pi++
+        else this.moveToward(wp, 8.2, dt)
+      }
       this.group.position.y = Math.abs(Math.sin(this.world.time * 11)) * 0.12
-      if (flatDist(prey.group.position, this.group.position) < 1.2) {
+      if (dist < 1.2) {
         this.alive = false
         this.world.removeUnit(this)
         const p = this.group.position.clone()
@@ -501,6 +547,7 @@ class ChaserUnit extends TokenUnit {
         this.world.reveal(enemyOf(this.team), 5)
       }
     }
+    this.updateWalkAnim(dt)
     this.group.updateMatrixWorld()
   }
 }

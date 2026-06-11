@@ -65,6 +65,34 @@ function glow(b: B, color: number, intensity = 1) {
 }
 
 /**
+ * 歩行アニメ用の脚/腕(付け根ピボット)。
+ * pivotを回転させると付け根から振れる。userData.animに登録して使う。
+ */
+function limb(
+  b: B, mat: THREE.Material,
+  px: number, py: number, pz: number,
+  len: number, r: number,
+  footMat?: THREE.Material, footR = 0,
+): THREE.Group {
+  const pivot = new THREE.Group()
+  pivot.position.set(px, py, pz)
+  const m = new THREE.Mesh(new THREE.CylinderGeometry(r, r * 1.15, len, 10), mat)
+  m.position.y = -len / 2
+  m.castShadow = true
+  m.receiveShadow = true
+  pivot.add(m)
+  if (footMat && footR > 0) {
+    const foot = new THREE.Mesh(new THREE.SphereGeometry(footR, 10, 8), footMat)
+    foot.scale.set(1, 0.7, 1.25)
+    foot.position.set(0, -len - footR * 0.3, 0.03)
+    foot.castShadow = true
+    pivot.add(foot)
+  }
+  b.g.add(pivot)
+  return pivot
+}
+
+/**
  * シェイプリンガー(将)— 親しみのある人型モンスター。
  * variantで角・耳などの個性、teamでトリム色が変わる。
  */
@@ -79,15 +107,13 @@ export function buildMonsterCommander(char: CharacterDef, team: Team): THREE.Gro
   // 体(ぷっくり)・おなかパッチ
   b.sph(0.34, main, 0, 0.78, 0, 14, 1.18, 0.95, 0.85)
   b.sph(0.25, sub, 0, 0.72, 0.13, 12, 1.05, 0.85, 0.6)
-  // 脚・足
-  b.cyl(0.09, 0.1, 0.3, main, -0.14, 0.22, 0)
-  b.cyl(0.09, 0.1, 0.3, main, 0.14, 0.22, 0)
-  b.sph(0.12, dark, -0.14, 0.07, 0.03, 10, 0.7, 1, 1.25)
-  b.sph(0.12, dark, 0.14, 0.07, 0.03, 10, 0.7, 1, 1.25)
-  // 腕
-  b.cyl(0.07, 0.08, 0.34, main, -0.36, 0.82, 0, 0, 0.5)
+  // 脚(腰ピボットで歩行アニメ対応)
+  const legL = limb(b, main, -0.14, 0.46, 0, 0.36, 0.09, dark, 0.12)
+  const legR = limb(b, main, 0.14, 0.46, 0, 0.36, 0.09, dark, 0.12)
+  // 腕(左腕は振り対応、右腕は銃を構えるため固定)
+  const armL = limb(b, main, -0.38, 0.98, 0, 0.32, 0.07, sub, 0.09)
+  armL.rotation.z = 0.25
   b.cyl(0.07, 0.08, 0.34, main, 0.36, 0.82, 0.08, -0.5, 0)
-  b.sph(0.09, sub, -0.44, 0.66, 0, 10)
   b.sph(0.09, sub, 0.42, 0.8, 0.26, 10)
   // チームスカーフ(首元の発光リング)
   b.torus(0.21, 0.05, teamGlow, 0, 1.05, 0, Math.PI / 2)
@@ -163,6 +189,7 @@ export function buildMonsterCommander(char: CharacterDef, team: Team): THREE.Gro
 
   const g = b.done()
   g.userData.muzzle = muzzle
+  g.userData.anim = { legs: [legL, legR], arms: [armL] }
   return g
 }
 
@@ -172,8 +199,8 @@ export function buildGunner(team: Team): THREE.Group {
   const body = b.mat(0xbfc6d2, { roughness: 0.5 })
   const dark = b.mat(0x39414e)
   const accent = glow(b, TEAM_COLOR[team], 0.9)
-  b.cyl(0.07, 0.09, 0.34, body, -0.12, 0.2, 0)
-  b.cyl(0.07, 0.09, 0.34, body, 0.12, 0.2, 0)
+  const legL = limb(b, body, -0.12, 0.4, 0, 0.36, 0.07)
+  const legR = limb(b, body, 0.12, 0.4, 0, 0.36, 0.07)
   b.sph(0.24, body, 0, 0.66, 0, 12, 1.1, 0.95, 0.8)
   b.box(0.3, 0.1, 0.06, accent, 0, 0.7, 0.18)
   b.sph(0.18, body, 0, 1.05, 0, 12)
@@ -182,6 +209,7 @@ export function buildGunner(team: Team): THREE.Group {
   b.box(0.07, 0.1, 0.5, dark, 0.24, 0.72, 0.16)
   const g = b.done()
   g.userData.muzzle = b.marker(0.24, 0.72, 0.45)
+  g.userData.anim = { legs: [legL, legR], arms: [] }
   return g
 }
 
@@ -292,11 +320,14 @@ export function buildChaser(team: Team): THREE.Group {
   b.sph(0.045, accent, 0.06, 0.52, 0.45, 8)
   b.cone(0.05, 0.14, dark, -0.09, 0.62, 0.28)
   b.cone(0.05, 0.14, dark, 0.09, 0.62, 0.28)
+  const legs: THREE.Group[] = []
   for (const [lx, lz] of [[-0.1, 0.18], [0.1, 0.18], [-0.1, -0.18], [0.1, -0.18]] as const) {
-    b.cyl(0.035, 0.045, 0.22, dark, lx, 0.12, lz)
+    legs.push(limb(b, dark, lx, 0.24, lz, 0.22, 0.04))
   }
   b.cone(0.04, 0.2, accent, 0, 0.42, -0.34, -2.2)
-  return b.done()
+  const g = b.done()
+  g.userData.anim = { legs, arms: [] }
+  return g
 }
 
 /** ボムスリンガー(曲射砲台トークン) */
