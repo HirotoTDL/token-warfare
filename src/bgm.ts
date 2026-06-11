@@ -17,6 +17,11 @@ export type TrackName = keyof typeof TRACKS
 
 export class Bgm {
   volume = 0.45
+
+  setVolume(mul: number) {
+    this.volume = 0.45 * mul
+    if (this.current && !this.current.paused) this.current.volume = this.volume
+  }
   private tracks = new Map<TrackName, HTMLAudioElement | null>()
   private current: HTMLAudioElement | null = null
   private currentName: TrackName | null = null

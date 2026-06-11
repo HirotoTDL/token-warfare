@@ -11,6 +11,7 @@ import {
 } from './types'
 import { TOKENS, DecoyUnit, loadoutFor } from './tokens'
 import { buildViewmodel } from './models'
+import { settings } from './settings'
 
 const GRAVITY = 20
 const EYE = 1.6
@@ -139,7 +140,7 @@ export class PlayerCommander implements Unit {
 
     // --- 視点 ---
     const zoomed = input.mouseRight && !this.charging
-    const sens = 0.0022 * (this.camera.fov / 75)
+    const sens = 0.0022 * settings.sens * (this.camera.fov / 75)
     this.yaw -= input.mouseDX * sens
     this.pitch -= input.mouseDY * sens
     this.pitch = Math.max(-1.45, Math.min(1.45, this.pitch))

@@ -3,13 +3,19 @@ export class Sfx {
   private ctx: AudioContext | null = null
   private noiseBuf: AudioBuffer | null = null
   private master: GainNode | null = null
+  private volMul = 1
+
+  setVolume(mul: number) {
+    this.volMul = mul
+    if (this.master) this.master.gain.value = 0.5 * mul
+  }
 
   unlock() {
     if (!this.ctx) {
       try {
         this.ctx = new AudioContext()
         this.master = this.ctx.createGain()
-        this.master.gain.value = 0.5
+        this.master.gain.value = 0.5 * this.volMul
         this.master.connect(this.ctx.destination)
         const len = this.ctx.sampleRate * 1
         this.noiseBuf = this.ctx.createBuffer(1, len, this.ctx.sampleRate)

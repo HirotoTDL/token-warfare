@@ -18,6 +18,7 @@ import { HUD } from './hud'
 import { TOKENS } from './tokens'
 import { buildCore } from './models'
 import { preloadModels, MODEL_MANIFEST } from './modelLoader'
+import { buildSettingsPanel, settings, onSettingsChange } from './settings'
 
 // --- 基盤 ---
 const app = document.getElementById('app')!
@@ -35,6 +36,16 @@ const sfx = new Sfx()
 const bgm = new Bgm()
 bgm.play('title') // 最初のクリックで解禁されるまで保留される
 preloadModels(MODEL_MANIFEST) // public/models/*.glb があれば自動採用
+
+// 設定(感度・音量)
+sfx.setVolume(settings.se)
+bgm.setVolume(settings.bgm)
+onSettingsChange((s) => {
+  sfx.setVolume(s.se)
+  bgm.setVolume(s.bgm)
+})
+document.getElementById('settings-title')!.appendChild(buildSettingsPanel())
+document.getElementById('settings-pause')!.appendChild(buildSettingsPanel())
 
 const hudRoot = document.getElementById('hud')!
 const screens = {

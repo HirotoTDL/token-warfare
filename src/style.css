@@ -286,6 +286,19 @@ body {
 }
 .feed-line.fade { opacity: 0; }
 
+/* ===== 設定パネル ===== */
+.settings-panel {
+  background: var(--panel); border: 1px solid var(--panel-line); border-radius: 8px;
+  padding: 14px 20px; min-width: 320px; backdrop-filter: blur(4px);
+}
+.settings-panel h3 { font-size: 12px; letter-spacing: 0.3em; color: #9cc2e8; margin-bottom: 10px; }
+.set-row { display: flex; align-items: center; gap: 12px; padding: 5px 0; font-size: 13px; color: #d8e2f2; }
+.set-row span { width: 86px; }
+.set-row b { width: 46px; text-align: right; color: #8fd8ff; font-size: 12px; }
+.set-row input[type="range"] { flex: 1; accent-color: var(--pink); cursor: pointer; }
+
+.resume-inner { display: flex; flex-direction: column; align-items: center; gap: 20px; }
+
 /* 狭い画面への対応 */
 @media (max-width: 1280px) {
   #char-cards { grid-template-columns: repeat(2, 290px); }
