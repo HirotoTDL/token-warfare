@@ -671,6 +671,7 @@ export class BotCommander implements Unit {
     if (sk === 'dome' && this.skillActiveT > 0) d *= 0.4
     if (this.armorT > 0) d *= 0.2
     this.hp -= d
+    this.world.notifyDamage(this, from, d)
     this.regenDelay = 6
     this.lastDamaged = 0
     this.flashT = 0.09

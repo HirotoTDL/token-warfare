@@ -149,6 +149,8 @@ class BattleView implements View {
   private suddenDeath = false
   private endTimer = -1
   private hitstopT = 0
+  /** プレイヤー戦績 */
+  stats = { dmgDealt: 0, dmgTaken: 0, tokenKills: 0, cores: 0, tpEarned: 0 }
 
   constructor(public config: MatchConfig, private onEnd: (scores: Record<Team, number>) => void) {
     this.arena = buildArena(this.world, config.mapKey)
@@ -172,6 +174,11 @@ class BattleView implements View {
     this.player.onHit = () => this.hud.hitmarker()
     this.player.onDamaged = () => this.hud.damage()
     this.player.onMessage = (m) => this.hud.message(m)
+
+    this.world.onDamage = (victim, attacker, amount) => {
+      if (attacker === this.player) this.stats.dmgDealt += amount
+      if (victim === this.player) this.stats.dmgTaken += amount
+    }
 
     this.world.onReveal = (team) => {
       if (team === 'blue') {
@@ -205,7 +212,10 @@ class BattleView implements View {
       this.hud.feed(`${victim.name}(${TEAM_NAME[victim.team]})撃破`)
       // 撃破地点に小コアをドロップ(回収しに行く動機)
       this.dropCore(victim.group.position.clone(), true)
-      if (killer === this.player) sfx.hitmarker()
+      if (killer === this.player) {
+        this.stats.tokenKills++
+        sfx.hitmarker()
+      }
     }
 
     this.hud.message('3分間 — 敵将を多く撃破した方が勝ち!', 3)
@@ -239,6 +249,8 @@ class BattleView implements View {
     if (i >= 0) this.world.cores.splice(i, 1)
     this.fx.ring(core.pos.clone(), core.small ? 0x7dffd0 : 0xffd23e)
     if (collector === this.player) {
+      this.stats.cores++
+      this.stats.tpEarned += tp
       sfx.core()
       this.hud.message(`コア回収 +${tp}TP`)
     }
@@ -441,6 +453,19 @@ function startBattle(charKey: string) {
       label.textContent = draw ? 'DRAW' : win ? 'WIN' : 'LOSE'
       label.className = draw ? 'draw' : win ? 'win' : 'lose'
       document.getElementById('result-score')!.textContent = `${scores.blue} - ${scores.red}`
+      // 戦績詳細
+      const b = battle!
+      const acc = b.player.shotsFired > 0 ? Math.round((b.player.shotsHit / b.player.shotsFired) * 100) : 0
+      document.getElementById('result-stats')!.innerHTML = [
+        ['与ダメージ', Math.round(b.stats.dmgDealt)],
+        ['被ダメージ', Math.round(b.stats.dmgTaken)],
+        ['命中率', `${acc}%`],
+        ['トークン撃破', b.stats.tokenKills],
+        ['配備', b.player.deploysCount],
+        ['コア回収', `${b.stats.cores}(+${b.stats.tpEarned}TP)`],
+      ]
+        .map(([k, v]) => `<div class="rs-item"><span>${k}</span><b>${v}</b></div>`)
+        .join('')
       document.getElementById('result-sub')!.textContent = draw
         ? '互角。次は盤面で上回れ。'
         : win

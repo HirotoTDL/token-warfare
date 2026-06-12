@@ -128,6 +128,7 @@ export class World {
   nav = new NavGrid(40)
   time = 0
   onKill: ((victim: Unit, killer: Unit | null) => void) | null = null
+  onDamage: ((victim: Unit, attacker: Unit | null, amount: number) => void) | null = null
 
   /** エナジーコア */
   cores: Core[] = []
@@ -175,6 +176,10 @@ export class World {
 
   notifyKill(victim: Unit, killer: Unit | null) {
     this.onKill?.(victim, killer)
+  }
+
+  notifyDamage(victim: Unit, attacker: Unit | null, amount: number) {
+    this.onDamage?.(victim, attacker, amount)
   }
 
   reveal(team: Team, sec: number) {

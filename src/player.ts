@@ -49,6 +49,10 @@ export class PlayerCommander implements Unit {
   tpRegenMul = 1
   regenDelay = 0
   invulnT = 0
+  /** 戦績カウンタ */
+  shotsFired = 0
+  shotsHit = 0
+  deploysCount = 0
 
   onHit: (() => void) | null = null
   onDamaged: ((amount: number) => void) | null = null
@@ -286,6 +290,7 @@ export class PlayerCommander implements Unit {
     if (moving) spread *= 1.5
     if (!this.onGround) spread *= 2.0
     const muzzlePos = this.muzzle.getWorldPosition(new THREE.Vector3())
+    this.shotsFired++
     for (let i = 0; i < w.pellets; i++) {
       const d = this.combat.spreadDir(dir, spread)
       this.combat.fireBolt(muzzlePos.clone(), d, {
@@ -310,6 +315,7 @@ export class PlayerCommander implements Unit {
 
   /** 着弾コールバック(combatから) */
   onBoltHit(_target: Unit) {
+    this.shotsHit++
     this.onHit?.()
     this.sfx.hitmarker()
   }
@@ -453,6 +459,7 @@ export class PlayerCommander implements Unit {
       return
     }
     this.tp -= def.cost
+    this.deploysCount++
     const unit = def.spawn(this.world, this.combat, this.sfx, this.team, new THREE.Vector3(p.x, 0, p.z), dir.clone().setY(0).normalize())
     this.world.addUnit(unit)
     this.combat.fx.ring(new THREE.Vector3(p.x, 0, p.z), TEAM_COLOR[this.team])
@@ -468,6 +475,7 @@ export class PlayerCommander implements Unit {
     if (sk === 'dome' && this.skillActiveT > 0) d *= 0.4
     if (this.armorT > 0) d *= 0.2
     this.hp -= d
+    this.world.notifyDamage(this, from, d)
     this.regenDelay = 6
     this.shakeT = 0.18
     this.shakeAmp = Math.min(0.035, 0.008 + d * 0.0009)

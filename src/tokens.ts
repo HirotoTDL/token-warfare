@@ -87,6 +87,7 @@ export abstract class TokenUnit implements Unit {
   takeDamage(amount: number, from: Unit | null) {
     if (!this.alive) return
     this.hp -= amount
+    this.world.notifyDamage(this, from, amount)
     this.flashT = 0.09
     for (const p of this.flashPairs) {
       p.m.emissive.setHex(0xffffff)
