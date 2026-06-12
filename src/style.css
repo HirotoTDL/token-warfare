@@ -96,9 +96,15 @@ body {
 .level-btn:hover { background: rgba(255, 210, 62, 0.85); color: #2a2030; transform: scale(1.08); }
 
 /* ===== キャラ選択(8人グリッド) ===== */
+/* 上下2段の間に帯を空け、背景の3Dショーケースを見せる */
+#screen-select {
+  background: radial-gradient(ellipse at center, rgba(10, 8, 20, 0.08) 0%, rgba(10, 8, 20, 0.62) 100%);
+}
+#screen-select .select-heading { margin: 14px 0 10px; }
 #char-cards {
-  display: grid; grid-template-columns: repeat(4, 270px); gap: 16px;
-  padding-bottom: 30px;
+  display: grid; grid-template-columns: repeat(4, 268px);
+  column-gap: 16px; row-gap: 150px;
+  padding-bottom: 16px;
 }
 .char-card {
   padding: 0 18px; border-radius: 10px; cursor: pointer; overflow: hidden;
@@ -339,7 +345,7 @@ body {
 
 /* 狭い画面への対応 */
 @media (max-width: 1280px) {
-  #char-cards { grid-template-columns: repeat(2, 290px); }
+  #char-cards { grid-template-columns: repeat(2, 290px); row-gap: 16px; }
   .hud-bc { bottom: 120px; width: 420px; }
   .hud-br { bottom: 330px; }
 }

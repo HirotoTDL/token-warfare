@@ -16,7 +16,7 @@ import { PlayerCommander } from './player'
 import { BotCommander, botParams } from './bot'
 import { HUD } from './hud'
 import { TOKENS } from './tokens'
-import { buildCore } from './models'
+import { buildCore, buildMonsterCommander } from './models'
 import { preloadModels, MODEL_MANIFEST } from './modelLoader'
 import { buildSettingsPanel, settings, onSettingsChange } from './settings'
 
@@ -60,6 +60,8 @@ function showScreen(name: keyof typeof screens | null) {
   for (const [k, el] of Object.entries(screens)) {
     el.classList.toggle('hidden', k !== name)
   }
+  // キャラ選択中はメニュー背景をショーケースカメラに
+  if (view instanceof MenuView) view.setShowcase(name === 'select')
 }
 
 function disposeScene(scene: THREE.Scene) {
@@ -83,17 +85,50 @@ interface View {
   dispose(): void
 }
 
-// --- メニュー背景 ---
+// --- メニュー背景(キャラ選択時は8人のショーケース) ---
 class MenuView implements View {
   private world = new World()
   private camera = new THREE.PerspectiveCamera(60, window.innerWidth / window.innerHeight, 0.1, 1200)
   private sky: { update(t: number): void }
   private arena: { update(dt: number, t: number): void; sunDir: THREE.Vector3 }
   private t = 0
+  private showcase = false
+  private monsters: THREE.Group[] = []
+  private focusIdx: number | null = null
+  private hopV: number[] = []
 
   constructor() {
     this.arena = buildArena(this.world)
     this.sky = createSky(this.world.scene, this.arena.sunDir)
+    // ショーケース: 8人が一列に並ぶ(キャラ選択画面の背景)
+    CHARACTERS.forEach((c, i) => {
+      const m = buildMonsterCommander(c, 'blue')
+      m.position.set((i - 3.5) * 2.4, 0, 8)
+      m.rotation.y = 0 // +z(カメラ側)を向く
+      this.world.scene.add(m)
+      this.monsters.push(m)
+      this.hopV.push(0)
+      const ped = new THREE.Mesh(
+        new THREE.CylinderGeometry(0.85, 0.95, 0.14, 20),
+        new THREE.MeshStandardMaterial({ color: 0x39414e, roughness: 0.5, metalness: 0.4 }),
+      )
+      ped.position.set((i - 3.5) * 2.4, 0.07, 8)
+      ped.receiveShadow = true
+      this.world.scene.add(ped)
+    })
+  }
+
+  setShowcase(on: boolean) {
+    this.showcase = on
+    if (!on) this.focusIdx = null
+  }
+
+  focusChar(i: number | null) {
+    if (i !== null && this.focusIdx !== i && this.monsters[i]) {
+      this.hopV[i] = 3.2 // 注目されたらぴょこんと跳ねる
+      sfx.hitmarker()
+    }
+    this.focusIdx = i
   }
 
   update(dt: number) {
@@ -101,9 +136,42 @@ class MenuView implements View {
     this.world.time = this.t
     this.sky.update(this.t)
     this.arena.update(dt, this.t)
-    const a = this.t * 0.08
-    this.camera.position.set(Math.cos(a) * 40, 14 + Math.sin(this.t * 0.3) * 2, Math.sin(a) * 40)
-    this.camera.lookAt(0, 2.5, 0)
+
+    // モンスターのアイドル挙動
+    this.monsters.forEach((m, i) => {
+      let baseY = Math.max(0, m.position.y + this.hopV[i] * dt)
+      if (this.hopV[i] !== 0 || baseY > 0) {
+        this.hopV[i] -= 14 * dt
+        if (baseY <= 0) {
+          baseY = 0
+          this.hopV[i] = 0
+        }
+        m.position.y = baseY
+      }
+      const sway = Math.sin(this.t * 1.6 + i * 1.3) * 0.06
+      m.rotation.y = (this.focusIdx === i ? Math.sin(this.t * 2.5) * 0.25 : sway)
+      m.rotation.z = Math.sin(this.t * 2 + i) * 0.015
+    })
+
+    if (this.showcase) {
+      // ショーケースカメラ(フォーカス中はそのキャラに寄る)
+      const target = new THREE.Vector3()
+      const look = new THREE.Vector3()
+      if (this.focusIdx !== null && this.monsters[this.focusIdx]) {
+        const mp = this.monsters[this.focusIdx].position
+        target.set(mp.x, 1.7, mp.z + 3.4)
+        look.set(mp.x, 1.2, mp.z)
+      } else {
+        target.set(Math.sin(this.t * 0.12) * 2.5, 3.0, 16.5)
+        look.set(0, 1.2, 8)
+      }
+      this.camera.position.lerp(target, Math.min(1, dt * 3.5))
+      this.camera.lookAt(look)
+    } else {
+      const a = this.t * 0.08
+      this.camera.position.set(Math.cos(a) * 40, 14 + Math.sin(this.t * 0.3) * 2, Math.sin(a) * 40)
+      this.camera.lookAt(0, 2.5, 0)
+    }
   }
 
   render() {
@@ -547,6 +615,13 @@ for (const c of CHARACTERS) {
   card.addEventListener('click', () => {
     sfx.unlock()
     startBattle(c.key)
+  })
+  const idx = CHARACTERS.indexOf(c)
+  card.addEventListener('mouseenter', () => {
+    if (view instanceof MenuView) view.focusChar(idx)
+  })
+  card.addEventListener('mouseleave', () => {
+    if (view instanceof MenuView) view.focusChar(null)
   })
   cardsRoot.appendChild(card)
 }
