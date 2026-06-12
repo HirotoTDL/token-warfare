@@ -1,7 +1,7 @@
 import * as THREE from 'three'
 import { World, type Core } from './world'
-import { buildArena } from './arena'
-import { createSky } from './sky'
+import { buildArena, MAPS } from './arena'
+import { createSky, SKY_DAY, SKY_DUSK } from './sky'
 import { Effects, Combat } from './combat'
 import { Sfx } from './sfx'
 import { Bgm } from './bgm'
@@ -124,6 +124,7 @@ export interface MatchConfig {
   charKey: string
   botLevel: number
   practice: boolean
+  mapKey: string
 }
 
 // --- 戦闘(3分スコアアタック) ---
@@ -150,8 +151,8 @@ class BattleView implements View {
   private hitstopT = 0
 
   constructor(public config: MatchConfig, private onEnd: (scores: Record<Team, number>) => void) {
-    this.arena = buildArena(this.world)
-    this.sky = createSky(this.world.scene, this.arena.sunDir)
+    this.arena = buildArena(this.world, config.mapKey)
+    this.sky = createSky(this.world.scene, this.arena.sunDir, (this.arena as any).dusk ? SKY_DUSK : SKY_DAY)
     this.fx = new Effects(this.world.scene)
     this.combat = new Combat(this.world, this.fx, sfx)
     this.world.scene.add(this.camera)
@@ -421,6 +422,7 @@ let view: View = new MenuView()
 let battle: BattleView | null = null
 let lastChar = 'renji'
 let pendingMode: { botLevel: number; practice: boolean } = { botLevel: 6, practice: false }
+let pendingMap = 'skyhaven'
 
 input.onLockChange = (locked) => {
   if (locked && battle) battle.everLocked = true
@@ -431,7 +433,7 @@ function startBattle(charKey: string) {
   lastChar = charKey
   view.dispose()
   battle = new BattleView(
-    { charKey, botLevel: pendingMode.botLevel, practice: pendingMode.practice },
+    { charKey, botLevel: pendingMode.botLevel, practice: pendingMode.practice, mapKey: pendingMap },
     (scores) => {
       const win = scores.blue > scores.red
       const draw = scores.blue === scores.red
@@ -460,6 +462,21 @@ function backToMenu(target: 'title' | 'mode' | 'select') {
   view = new MenuView()
   showScreen(target)
   bgm.play(target === 'title' ? 'title' : 'select')
+}
+
+// マップ選択チップ
+const mapRow = document.getElementById('map-row')!
+for (const m of MAPS) {
+  const chip = document.createElement('button')
+  chip.className = 'map-chip' + (m.key === pendingMap ? ' sel' : '')
+  chip.innerHTML = `<b>${m.name}</b><span>${m.desc}</span>`
+  chip.addEventListener('click', () => {
+    pendingMap = m.key
+    mapRow.querySelectorAll('.map-chip').forEach((c) => c.classList.remove('sel'))
+    chip.classList.add('sel')
+    sfx.unlock()
+  })
+  mapRow.appendChild(chip)
 }
 
 // モード選択

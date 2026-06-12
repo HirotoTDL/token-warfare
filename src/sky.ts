@@ -19,12 +19,30 @@ float fbm(vec2 p) {
 }
 `
 
+export interface SkyPalette {
+  zenith: THREE.Color
+  horizon: THREE.Color
+}
+
+export const SKY_DAY: SkyPalette = {
+  zenith: new THREE.Color(0.16, 0.42, 0.88),
+  horizon: new THREE.Color(0.98, 0.86, 0.94),
+}
+
+/** 夕暮れパンク(ネオンドックス用) */
+export const SKY_DUSK: SkyPalette = {
+  zenith: new THREE.Color(0.15, 0.1, 0.4),
+  horizon: new THREE.Color(1.0, 0.55, 0.65),
+}
+
 /** シェーダースカイドーム+雲海。update(t)で雲が流れる */
-export function createSky(scene: THREE.Scene, sunDir: THREE.Vector3) {
+export function createSky(scene: THREE.Scene, sunDir: THREE.Vector3, palette: SkyPalette = SKY_DAY) {
   // --- 空ドーム ---
   const skyUniforms = {
     uTime: { value: 0 },
     uSunDir: { value: sunDir.clone().normalize() },
+    uZenith: { value: palette.zenith },
+    uHorizon: { value: palette.horizon },
   }
   const skyMat = new THREE.ShaderMaterial({
     side: THREE.BackSide,
@@ -40,13 +58,15 @@ export function createSky(scene: THREE.Scene, sunDir: THREE.Vector3) {
     fragmentShader: `
       uniform float uTime;
       uniform vec3 uSunDir;
+      uniform vec3 uZenith;
+      uniform vec3 uHorizon;
       varying vec3 vPos;
       ${NOISE_GLSL}
       void main() {
         vec3 dir = normalize(vPos);
         float h = clamp(dir.y, -1.0, 1.0);
-        vec3 zenith = vec3(0.16, 0.42, 0.88);
-        vec3 horizon = vec3(0.98, 0.86, 0.94);
+        vec3 zenith = uZenith;
+        vec3 horizon = uHorizon;
         vec3 col = mix(horizon, zenith, pow(max(h, 0.0), 0.55));
         if (h < 0.0) col = mix(horizon, vec3(0.55, 0.65, 0.78), min(1.0, -h * 3.0));
         float sunD = max(dot(dir, normalize(uSunDir)), 0.0);

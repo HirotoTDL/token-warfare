@@ -64,6 +64,18 @@ body {
 
 /* ===== モード選択 ===== */
 .select-heading { font-size: 26px; letter-spacing: 0.4em; margin: 30px 0; color: #f0e0f5; }
+.map-row { display: flex; align-items: center; gap: 12px; margin-bottom: 24px; }
+.map-label { font-size: 13px; letter-spacing: 0.2em; color: #b8a8e8; }
+.map-chip {
+  font-family: inherit; cursor: pointer; color: var(--text); text-align: left;
+  background: var(--panel); border: 1px solid var(--panel-line); border-radius: 7px;
+  padding: 9px 16px; display: flex; flex-direction: column; gap: 2px; transition: all 0.13s;
+}
+.map-chip b { font-size: 14px; letter-spacing: 0.08em; }
+.map-chip span { font-size: 10.5px; color: #a8b4cc; }
+.map-chip.sel { border-color: var(--pink); box-shadow: 0 0 12px rgba(255, 79, 163, 0.45); background: rgba(80, 30, 60, 0.6); }
+.map-chip:hover { transform: translateY(-2px); }
+
 .mode-buttons { display: flex; gap: 28px; align-items: stretch; }
 .mode-card {
   width: 320px; padding: 26px; border-radius: 10px; cursor: pointer;

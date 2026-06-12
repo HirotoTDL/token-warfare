@@ -82,16 +82,28 @@ function graffitiTexture(): THREE.Texture {
   return tex
 }
 
-export function buildArena(world: World) {
+export interface MapInfo {
+  key: string
+  name: string
+  desc: string
+}
+
+export const MAPS: MapInfo[] = [
+  { key: 'skyhaven', name: 'スカイヘイヴン', desc: '中央監視塔と十字の遮蔽。バランス型' },
+  { key: 'neondocks', name: 'ネオンドックス', desc: '夕暮れの大通り。長い射線と側道の裏取り' },
+]
+
+export function buildArena(world: World, mapKey = 'skyhaven') {
   const scene = world.scene
   const half = world.arenaHalf
   const updates: ((dt: number, t: number) => void)[] = []
+  const dusk = mapKey === 'neondocks'
 
-  scene.fog = new THREE.Fog(0xf0dcec, 80, 460)
+  scene.fog = new THREE.Fog(dusk ? 0xd98aa6 : 0xf0dcec, 80, 460)
 
   // --- ライティング ---
-  const sunDir = new THREE.Vector3(40, 62, 26)
-  const sun = new THREE.DirectionalLight(0xfff2e0, 2.7)
+  const sunDir = new THREE.Vector3(40, dusk ? 30 : 62, 26)
+  const sun = new THREE.DirectionalLight(dusk ? 0xffc090 : 0xfff2e0, dusk ? 2.3 : 2.7)
   sun.position.copy(sunDir)
   sun.castShadow = true
   sun.shadow.mapSize.set(2048, 2048)
@@ -103,7 +115,7 @@ export function buildArena(world: World) {
   sun.shadow.camera.far = 180
   sun.shadow.bias = -0.0004
   scene.add(sun)
-  scene.add(new THREE.HemisphereLight(0xc8d8f5, 0x5a4a50, 0.8))
+  scene.add(new THREE.HemisphereLight(dusk ? 0x9a86c8 : 0xc8d8f5, dusk ? 0x55384a : 0x5a4a50, dusk ? 0.75 : 0.8))
 
   // --- 浮遊島本体 ---
   const groundMat = new THREE.MeshStandardMaterial({
@@ -194,67 +206,113 @@ export function buildArena(world: World) {
     solid(new THREE.BoxGeometry(w, h, d), wallMat, cx, h / 2, cz, aabb(cx, cz, w, h, d))
   }
 
-  crate(10, 8, 2.2); crate(-10, -8, 2.2)
-  crate(-12, 14, 2.0); crate(12, -14, 2.0)
-  crate(22, 3, 2.4); crate(-22, -3, 2.4)
-  crate(5, 22, 1.8); crate(-5, -22, 1.8)
-  crate(18, 18, 2.0); crate(-18, -18, 2.0)
-  crate(16, -22, 1.8); crate(-16, 22, 1.8)
-  crate(27, -12, 2.0); crate(-27, 12, 2.0)
-  crate(9.7, 8.2, 1.2); crate(-9.7, -8.2, 1.2)
-
-  wall(0, 13, 7, 0.9); wall(0, -13, 7, 0.9)
-  wall(13, 0, 0.9, 7); wall(-13, 0, 0.9, 7)
-  wall(26, 20, 6, 0.9, 2.2); wall(-26, -20, 6, 0.9, 2.2)
-  wall(30, -2, 0.9, 6, 2.2); wall(-30, 2, 0.9, 6, 2.2)
-
   const barrelMat = new THREE.MeshStandardMaterial({ color: 0xff5040, roughness: 0.45, metalness: 0.3 })
   const barrelMat2 = new THREE.MeshStandardMaterial({ color: 0x29d3e8, roughness: 0.45, metalness: 0.3 })
   const barrelGeo = new THREE.CylinderGeometry(0.5, 0.5, 1.15, 14)
   let bIdx = 0
-  for (const [bx, bz] of [[12.2, 2.4], [13.1, 3.1], [-12.2, -2.4], [3.2, -24], [-3.2, 24]] as const) {
+  function barrel(bx: number, bz: number) {
     solid(barrelGeo, bIdx++ % 2 ? barrelMat : barrelMat2, bx, 0.575, bz, aabb(bx, bz, 1.0, 1.15, 1.0), false)
   }
-
-  // --- 中央監視塔 ---
   const pillarMat = new THREE.MeshStandardMaterial({ color: 0x8a94a2, roughness: 0.5, metalness: 0.45 })
-  for (const [px, pz] of [[2.9, 2.9], [-2.9, 2.9], [2.9, -2.9], [-2.9, -2.9]] as const) {
-    solid(new THREE.BoxGeometry(1.15, 5.6, 1.15), pillarMat, px, 2.8, pz, aabb(px, pz, 1.15, 5.6, 1.15))
+
+  // 回転エンブレム(両マップ共通の中央モチーフ)
+  function emblemAt(x: number, y: number, z: number) {
+    const emblemMat = new THREE.MeshStandardMaterial({
+      color: 0xffe066, emissive: 0xcfa830, emissiveIntensity: 0.9,
+      metalness: 0.8, roughness: 0.3,
+    })
+    const emblem = new THREE.Mesh(new THREE.OctahedronGeometry(0.7), emblemMat)
+    emblem.position.set(x, y, z)
+    scene.add(emblem)
+    updates.push((dt, t) => {
+      emblem.rotation.y += dt * 0.8
+      emblem.position.y = y + Math.sin(t * 1.2) * 0.18
+    })
   }
-  const roof = new THREE.Mesh(new THREE.BoxGeometry(8.6, 0.5, 8.6), wallMat)
-  roof.position.y = 5.85
-  roof.castShadow = true
-  roof.receiveShadow = true
-  scene.add(roof)
-  world.obstacleMeshes.push(roof)
-  const neonRing = new THREE.Mesh(
-    new THREE.TorusGeometry(4.6, 0.08, 8, 40),
-    new THREE.MeshStandardMaterial({ color: 0xff4fa3, emissive: 0xff4fa3, emissiveIntensity: 1.6 }),
-  )
-  neonRing.rotation.x = Math.PI / 2
-  neonRing.position.y = 6.2
-  scene.add(neonRing)
-  const antenna = new THREE.Mesh(new THREE.CylinderGeometry(0.05, 0.09, 3.2, 8), pillarMat)
-  antenna.position.y = 7.7
-  scene.add(antenna)
-  const beacon = new THREE.Mesh(
-    new THREE.SphereGeometry(0.16, 10, 8),
-    new THREE.MeshStandardMaterial({ color: 0xffffff, emissive: 0xff4040, emissiveIntensity: 2 }),
-  )
-  beacon.position.y = 9.4
-  scene.add(beacon)
-  const emblemMat = new THREE.MeshStandardMaterial({
-    color: 0xffe066, emissive: 0xcfa830, emissiveIntensity: 0.9,
-    metalness: 0.8, roughness: 0.3,
-  })
-  const emblem = new THREE.Mesh(new THREE.OctahedronGeometry(0.7), emblemMat)
-  emblem.position.y = 3.4
-  scene.add(emblem)
-  updates.push((dt, t) => {
-    emblem.rotation.y += dt * 0.8
-    emblem.position.y = 3.4 + Math.sin(t * 1.2) * 0.18
-    ;(beacon.material as THREE.MeshStandardMaterial).emissiveIntensity = 1.2 + Math.sin(t * 4) * 1.0
-  })
+
+  if (mapKey === 'neondocks') {
+    // ===== ネオンドックス: 中央大通り+両翼の側道 =====
+    // 大通りの長壁(中央に横断ギャップ)
+    wall(7, -9, 0.9, 12, 2.6); wall(-7, -9, 0.9, 12, 2.6)
+    wall(7, 9, 0.9, 12, 2.6); wall(-7, 9, 0.9, 12, 2.6)
+    // 中央ゲート(プラザの目印)
+    for (const px of [-2.4, 2.4]) {
+      solid(new THREE.BoxGeometry(1.0, 5.0, 1.0), pillarMat, px, 2.5, 0, aabb(px, 0, 1.0, 5.0, 1.0))
+    }
+    const beam = new THREE.Mesh(new THREE.BoxGeometry(6.2, 0.5, 1.2), wallMat)
+    beam.position.y = 5.2
+    beam.castShadow = true
+    scene.add(beam)
+    world.obstacleMeshes.push(beam)
+    emblemAt(0, 3.6, 0)
+    // 側道フィールドのクレート群
+    crate(16, 5, 2.2); crate(-16, -5, 2.2)
+    crate(16, -5, 2.0); crate(-16, 5, 2.0)
+    crate(23, 11, 2.4); crate(-23, -11, 2.4)
+    crate(23, -11, 1.8); crate(-23, 11, 1.8)
+    crate(13, 20, 2.0); crate(-13, -20, 2.0)
+    crate(13.8, 20.7, 1.1); crate(-13.8, -20.7, 1.1)
+    // コーナーバリケード
+    wall(27, 22, 6, 0.9, 2.2); wall(-27, -22, 6, 0.9, 2.2)
+    wall(27, -22, 6, 0.9, 2.2); wall(-27, 22, 6, 0.9, 2.2)
+    // 大通り出入口のバレル
+    barrel(0, 18.5); barrel(1.2, 19.3); barrel(0, -18.5); barrel(-1.2, -19.3)
+    barrel(20, 0); barrel(-20, 0)
+    world.coreSpots = [
+      new THREE.Vector3(0, 0, 16), new THREE.Vector3(0, 0, -16),
+      new THREE.Vector3(17, 0, 0), new THREE.Vector3(-17, 0, 0),
+      new THREE.Vector3(24, 0, 16), new THREE.Vector3(-24, 0, -16),
+      new THREE.Vector3(24, 0, -16), new THREE.Vector3(-24, 0, 16),
+    ]
+  } else {
+    // ===== スカイヘイヴン: 中央監視塔+十字遮蔽 =====
+    crate(10, 8, 2.2); crate(-10, -8, 2.2)
+    crate(-12, 14, 2.0); crate(12, -14, 2.0)
+    crate(22, 3, 2.4); crate(-22, -3, 2.4)
+    crate(5, 22, 1.8); crate(-5, -22, 1.8)
+    crate(18, 18, 2.0); crate(-18, -18, 2.0)
+    crate(16, -22, 1.8); crate(-16, 22, 1.8)
+    crate(27, -12, 2.0); crate(-27, 12, 2.0)
+    crate(9.7, 8.2, 1.2); crate(-9.7, -8.2, 1.2)
+
+    wall(0, 13, 7, 0.9); wall(0, -13, 7, 0.9)
+    wall(13, 0, 0.9, 7); wall(-13, 0, 0.9, 7)
+    wall(26, 20, 6, 0.9, 2.2); wall(-26, -20, 6, 0.9, 2.2)
+    wall(30, -2, 0.9, 6, 2.2); wall(-30, 2, 0.9, 6, 2.2)
+
+    barrel(12.2, 2.4); barrel(13.1, 3.1); barrel(-12.2, -2.4); barrel(3.2, -24); barrel(-3.2, 24)
+
+    // 中央監視塔
+    for (const [px, pz] of [[2.9, 2.9], [-2.9, 2.9], [2.9, -2.9], [-2.9, -2.9]] as const) {
+      solid(new THREE.BoxGeometry(1.15, 5.6, 1.15), pillarMat, px, 2.8, pz, aabb(px, pz, 1.15, 5.6, 1.15))
+    }
+    const roof = new THREE.Mesh(new THREE.BoxGeometry(8.6, 0.5, 8.6), wallMat)
+    roof.position.y = 5.85
+    roof.castShadow = true
+    roof.receiveShadow = true
+    scene.add(roof)
+    world.obstacleMeshes.push(roof)
+    const neonRing = new THREE.Mesh(
+      new THREE.TorusGeometry(4.6, 0.08, 8, 40),
+      new THREE.MeshStandardMaterial({ color: 0xff4fa3, emissive: 0xff4fa3, emissiveIntensity: 1.6 }),
+    )
+    neonRing.rotation.x = Math.PI / 2
+    neonRing.position.y = 6.2
+    scene.add(neonRing)
+    const antenna = new THREE.Mesh(new THREE.CylinderGeometry(0.05, 0.09, 3.2, 8), pillarMat)
+    antenna.position.y = 7.7
+    scene.add(antenna)
+    const beacon = new THREE.Mesh(
+      new THREE.SphereGeometry(0.16, 10, 8),
+      new THREE.MeshStandardMaterial({ color: 0xffffff, emissive: 0xff4040, emissiveIntensity: 2 }),
+    )
+    beacon.position.y = 9.4
+    scene.add(beacon)
+    updates.push((_dt, t) => {
+      ;(beacon.material as THREE.MeshStandardMaterial).emissiveIntensity = 1.2 + Math.sin(t * 4) * 1.0
+    })
+    emblemAt(0, 3.4, 0)
+  }
 
   // --- 両軍基地 ---
   for (const team of ['blue', 'red'] as Team[]) {
@@ -323,13 +381,15 @@ export function buildArena(world: World) {
     scene.add(light)
   }
 
-  // --- エナジーコア出現スポット ---
-  world.coreSpots = [
-    new THREE.Vector3(18, 0, 0), new THREE.Vector3(-18, 0, 0),
-    new THREE.Vector3(0, 0, 18), new THREE.Vector3(0, 0, -18),
-    new THREE.Vector3(24, 0, 20), new THREE.Vector3(-24, 0, -20),
-    new THREE.Vector3(24, 0, -20), new THREE.Vector3(-24, 0, 20),
-  ]
+  // --- エナジーコア出現スポット(レイアウト側で未設定ならデフォルト) ---
+  if (!world.coreSpots.length) {
+    world.coreSpots = [
+      new THREE.Vector3(18, 0, 0), new THREE.Vector3(-18, 0, 0),
+      new THREE.Vector3(0, 0, 18), new THREE.Vector3(0, 0, -18),
+      new THREE.Vector3(24, 0, 20), new THREE.Vector3(-24, 0, -20),
+      new THREE.Vector3(24, 0, -20), new THREE.Vector3(-24, 0, 20),
+    ]
+  }
   // スポットの目印(うっすら光る円)
   for (const sp of world.coreSpots) {
     const marker = new THREE.Mesh(
@@ -367,6 +427,7 @@ export function buildArena(world: World) {
 
   return {
     sunDir,
+    dusk,
     update(dt: number, t: number) {
       for (const u of updates) u(dt, t)
     },
