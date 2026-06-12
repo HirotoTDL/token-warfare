@@ -222,6 +222,9 @@ class BattleView implements View {
   private hitstopT = 0
   /** プレイヤー戦績 */
   stats = { dmgDealt: 0, dmgTaken: 0, tokenKills: 0, cores: 0, tpEarned: 0 }
+  /** チュートリアルTIP(最初の3試合のみ、各1回) */
+  private tipsEnabled = false
+  private tipsShown = new Set<string>()
 
   constructor(public config: MatchConfig, private onEnd: (scores: Record<Team, number>) => void) {
     this.arena = buildArena(this.world, config.mapKey)
@@ -294,6 +297,22 @@ class BattleView implements View {
     }
 
     this.hud.message('3分間 — 敵将を多く撃破した方が勝ち!', 3)
+
+    // 最初の3試合だけチュートリアルTIPを出す
+    try {
+      const played = parseInt(localStorage.getItem('tw-matches') ?? '0', 10)
+      this.tipsEnabled = played < 3
+      localStorage.setItem('tw-matches', String(played + 1))
+    } catch {
+      this.tipsEnabled = false
+    }
+  }
+
+  /** 条件を満たしたTIPを1度だけ表示 */
+  private tip(key: string, text: string) {
+    if (!this.tipsEnabled || this.tipsShown.has(key)) return
+    this.tipsShown.add(key)
+    this.hud.tip(text)
   }
 
   // --- エナジーコア ---
@@ -441,6 +460,16 @@ class BattleView implements View {
       // リビールタイマー減衰
       for (const team of ['blue', 'red'] as Team[]) {
         this.world.revealT[team] = Math.max(0, this.world.revealT[team] - dt)
+      }
+
+      // チュートリアルTIP(文脈に応じて1回ずつ)
+      if (this.tipsEnabled) {
+        const elapsed = MATCH_TIME - this.timer
+        if (elapsed > 2.5) this.tip('deploy', 'キー1〜4で照準先にトークンを配備して盤面を作ろう')
+        if (elapsed > 12) this.tip('skill', `Eでスキル「${this.player.char.skill.name}」を使える`)
+        if (this.player.energy < 30 && this.player.alive) this.tip('energy', 'エネルギー残量に注意 — R長押しでチャージ(無防備になる)')
+        if (this.world.cores.some((c) => !c.small)) this.tip('core', 'フィールドのコア(ミニマップの黄色◆)を回収するとTP+20')
+        if (this.player.hp < this.player.maxHp * 0.45 && this.player.alive) this.tip('retreat', 'ピンチの時は遮蔽に隠れて6秒で自動回復が始まる')
       }
     }
 

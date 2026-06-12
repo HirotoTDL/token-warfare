@@ -29,6 +29,7 @@ export class HUD {
   private slotEls: { root: HTMLElement; count: HTMLElement }[] = []
   private msgTimer = 0
   private warnTimer = 0
+  private tipTimer = 0
   private lastTimerText = ''
 
   constructor(root: HTMLElement, char: CharacterDef, loadout: TokenDef[]) {
@@ -80,13 +81,14 @@ export class HUD {
       </div>
       <div id="h-feed"></div>
       <div id="h-msg"></div>
+      <div id="h-tip"></div>
       <div id="h-killbanner"></div>
       <div id="h-minimap-slot"></div>
     `
     const ids = ['h-score-blue', 'h-score-red', 'h-timer', 'h-ot', 'h-warn', 'h-hp', 'h-hp-fill',
       'h-en-fill', 'h-en-state', 'h-skill', 'h-skill-cd', 'h-momentum',
       'h-tp-fill', 'h-tp', 'h-slots', 'h-feed', 'h-msg', 'h-crosshair', 'h-hitmarker',
-      'h-vignette', 'h-stealth', 'h-dead', 'h-dead-count', 'h-minimap-slot', 'h-killbanner']
+      'h-vignette', 'h-stealth', 'h-dead', 'h-dead-count', 'h-minimap-slot', 'h-killbanner', 'h-tip']
     for (const id of ids) this.els[id] = root.querySelector(`#${id}`) as HTMLElement
     this.els['h-minimap-slot'].appendChild(this.minimap.canvas)
 
@@ -162,6 +164,18 @@ export class HUD {
       this.warnTimer -= dt
       if (this.warnTimer <= 0) this.els['h-warn'].classList.remove('show')
     }
+    if (this.tipTimer > 0) {
+      this.tipTimer -= dt
+      if (this.tipTimer <= 0) this.els['h-tip'].classList.remove('show')
+    }
+  }
+
+  /** チュートリアルTIP(初心者向けの文脈ヘルプ) */
+  tip(text: string, sec = 5) {
+    const el = this.els['h-tip']
+    el.innerHTML = `<b>TIP</b> ${text}`
+    el.classList.add('show')
+    this.tipTimer = sec
   }
 
   message(text: string, sec = 1.6) {
