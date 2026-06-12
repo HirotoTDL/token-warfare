@@ -20,6 +20,7 @@ import { buildCore, buildMonsterCommander } from './models'
 import { preloadModels, MODEL_MANIFEST } from './modelLoader'
 import { buildSettingsPanel, settings, onSettingsChange } from './settings'
 import { simulateMatch, simulateMatrix, summarize } from './sim'
+import { DamagePopups } from './dmgpop'
 
 // --- 基盤 ---
 const app = document.getElementById('app')!
@@ -210,6 +211,7 @@ class BattleView implements View {
   private respawnT: Partial<Record<Team, number>> = {}
   private fx: Effects
   private combat: Combat
+  private popups: DamagePopups
   private sky: { update(t: number): void }
   private arena: { update(dt: number, t: number): void; sunDir: THREE.Vector3 }
   private t = 0
@@ -226,6 +228,7 @@ class BattleView implements View {
     this.sky = createSky(this.world.scene, this.arena.sunDir, (this.arena as any).dusk ? SKY_DUSK : SKY_DAY)
     this.fx = new Effects(this.world.scene)
     this.combat = new Combat(this.world, this.fx, sfx)
+    this.popups = new DamagePopups(this.world.scene)
     this.world.scene.add(this.camera)
 
     const char = characterByKey(config.charKey)
@@ -245,7 +248,10 @@ class BattleView implements View {
     this.player.onMessage = (m) => this.hud.message(m)
 
     this.world.onDamage = (victim, attacker, amount) => {
-      if (attacker === this.player) this.stats.dmgDealt += amount
+      if (attacker === this.player) {
+        this.stats.dmgDealt += amount
+        if (victim !== this.player) this.popups.show(victim, amount)
+      }
       if (victim === this.player) this.stats.dmgTaken += amount
     }
 
@@ -444,6 +450,7 @@ class BattleView implements View {
     for (const u of [...this.world.units]) u.update(udt)
     this.fx.update(udt)
     this.combat.update(udt)
+    this.popups.update(udt)
 
     if (!this.over) {
       this.hud.update(
@@ -494,6 +501,7 @@ class BattleView implements View {
     hudRoot.classList.add('hidden')
     this.fx.dispose()
     this.combat.dispose()
+    this.popups.dispose()
     disposeScene(this.world.scene)
   }
 }
