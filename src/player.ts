@@ -78,6 +78,8 @@ export class PlayerCommander implements Unit {
   private energyWarned = false
   private shakeT = 0
   private shakeAmp = 0
+  private recoilP = 0
+  private recoilY = 0
 
   constructor(
     world: World, combat: Combat, sfx: Sfx, input: Input,
@@ -111,7 +113,13 @@ export class PlayerCommander implements Unit {
     this.viewmodel.position.set(0.22, -0.2, -0.48)
     this.muzzle = this.viewmodel.userData.muzzle as THREE.Object3D
     camera.add(this.viewmodel)
+    // マズルライト(発砲時に周囲を照らす)
+    this.muzzleLight = new THREE.PointLight(char.weapon.boltColor, 0, 9, 2)
+    this.muzzleLight.position.set(0.22, -0.15, -0.9)
+    camera.add(this.muzzleLight)
   }
+
+  private muzzleLight!: THREE.PointLight
 
   get weapon() {
     return this.char.weapon
@@ -207,8 +215,12 @@ export class PlayerCommander implements Unit {
     // --- カメラ更新 ---
     this.bobT += dt * (moving && this.onGround ? (sprinting ? 13 : 10) : 0)
     const bob = Math.sin(this.bobT) * 0.035 * (moving && this.onGround ? 1 : 0)
+    // リコイルは視覚オフセットとして適用し、自動で戻る(エイムは安定)
+    const decay = Math.exp(-dt * 9)
+    this.recoilP *= decay
+    this.recoilY *= decay
     this.camera.position.set(this.pos.x, this.pos.y + EYE + bob, this.pos.z)
-    this.camera.rotation.set(this.pitch, this.yaw, 0)
+    this.camera.rotation.set(this.pitch + this.recoilP, this.yaw + this.recoilY, 0)
     // 被弾カメラシェイク
     if (this.shakeT > 0) {
       this.shakeT -= dt
@@ -222,6 +234,7 @@ export class PlayerCommander implements Unit {
       this.camera.updateProjectionMatrix()
     }
     this.vmKick = Math.max(0, this.vmKick - dt * 0.6)
+    this.muzzleLight.intensity *= Math.exp(-dt * 16)
     this.viewmodel.position.set(
       zoomed ? 0.09 : 0.22,
       (zoomed ? -0.15 : -0.2) + Math.sin(this.bobT * 0.5) * 0.006,
@@ -307,9 +320,11 @@ export class PlayerCommander implements Unit {
       })
     }
     this.combat.fx.flash(muzzlePos, w.boltColor, 0.05)
+    this.muzzleLight.intensity = 9
     this.sfx.shot(w.energyCost > 10)
-    this.pitch += w.recoil * (0.7 + Math.random() * 0.5)
-    this.yaw += (Math.random() - 0.5) * w.recoil * 0.6
+    // リコイル(視覚キック。自動で戻るのでエイムは安定)
+    this.recoilP = Math.min(0.12, this.recoilP + w.recoil * (0.7 + Math.random() * 0.5))
+    this.recoilY += (Math.random() - 0.5) * w.recoil * 0.6
     this.vmKick = Math.min(0.08, this.vmKick + (w.energyCost > 10 ? 0.06 : 0.022))
   }
 

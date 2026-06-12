@@ -401,6 +401,37 @@ export function buildArena(world: World, mapKey = 'skyhaven') {
     scene.add(marker)
   }
 
+  // --- 浮遊パーティクル(空気感の演出) ---
+  {
+    const count = 240
+    const pos = new Float32Array(count * 3)
+    const vel = new Float32Array(count)
+    for (let i = 0; i < count; i++) {
+      pos[i * 3] = (Math.random() - 0.5) * half * 2
+      pos[i * 3 + 1] = Math.random() * 12
+      pos[i * 3 + 2] = (Math.random() - 0.5) * half * 2
+      vel[i] = 0.2 + Math.random() * 0.5
+    }
+    const pGeo = new THREE.BufferGeometry()
+    pGeo.setAttribute('position', new THREE.BufferAttribute(pos, 3))
+    const pMat = new THREE.PointsMaterial({
+      color: dusk ? 0xffa0c8 : 0xaee8ff,
+      size: 0.08, transparent: true, opacity: 0.5,
+      blending: THREE.AdditiveBlending, depthWrite: false, sizeAttenuation: true,
+    })
+    pMat.color.multiplyScalar(1.6)
+    const points = new THREE.Points(pGeo, pMat)
+    scene.add(points)
+    updates.push((dt, t) => {
+      for (let i = 0; i < count; i++) {
+        pos[i * 3 + 1] += vel[i] * dt
+        pos[i * 3] += Math.sin(t * 0.6 + i) * dt * 0.25
+        if (pos[i * 3 + 1] > 13) pos[i * 3 + 1] = 0
+      }
+      pGeo.attributes.position.needsUpdate = true
+    })
+  }
+
   // --- 遠景の浮遊岩 ---
   const farMat = new THREE.MeshStandardMaterial({ color: 0x6e8096, roughness: 0.9 })
   const floaters: { g: THREE.Group; phase: number; amp: number }[] = []

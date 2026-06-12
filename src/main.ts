@@ -21,6 +21,8 @@ import { preloadModels, MODEL_MANIFEST } from './modelLoader'
 import { buildSettingsPanel, settings, onSettingsChange } from './settings'
 import { simulateMatch, simulateMatrix, summarize } from './sim'
 import { DamagePopups } from './dmgpop'
+import { PostFX } from './postfx'
+import { RoomEnvironment } from 'three/examples/jsm/environments/RoomEnvironment.js'
 
 // --- 基盤 ---
 const app = document.getElementById('app')!
@@ -30,8 +32,13 @@ renderer.setSize(window.innerWidth, window.innerHeight)
 renderer.shadowMap.enabled = true
 renderer.shadowMap.type = THREE.PCFSoftShadowMap
 renderer.toneMapping = THREE.ACESFilmicToneMapping
-renderer.toneMappingExposure = 1.05
+renderer.toneMappingExposure = 0.98
 app.appendChild(renderer.domElement)
+
+const postfx = new PostFX(renderer)
+// IBL環境マップ(PBRマテリアルに艶と環境光を与える)
+const pmrem = new THREE.PMREMGenerator(renderer)
+const envTex = pmrem.fromScene(new RoomEnvironment(), 0.04).texture
 
 const input = new Input(renderer.domElement)
 const sfx = new Sfx()
@@ -102,6 +109,8 @@ class MenuView implements View {
   constructor() {
     this.arena = buildArena(this.world)
     this.sky = createSky(this.world.scene, this.arena.sunDir)
+    this.world.scene.environment = envTex
+    ;(this.world.scene as any).environmentIntensity = 0.18
     // ショーケース: 8人が一列に並ぶ(キャラ選択画面の背景)
     CHARACTERS.forEach((c, i) => {
       const m = buildMonsterCommander(c, 'blue')
@@ -177,7 +186,7 @@ class MenuView implements View {
   }
 
   render() {
-    renderer.render(this.world.scene, this.camera)
+    postfx.render(this.world.scene, this.camera)
   }
 
   resize() {
@@ -229,6 +238,8 @@ class BattleView implements View {
   constructor(public config: MatchConfig, private onEnd: (scores: Record<Team, number>) => void) {
     this.arena = buildArena(this.world, config.mapKey)
     this.sky = createSky(this.world.scene, this.arena.sunDir, (this.arena as any).dusk ? SKY_DUSK : SKY_DAY)
+    this.world.scene.environment = envTex
+    ;(this.world.scene as any).environmentIntensity = (this.arena as any).dusk ? 0.28 : 0.18
     this.fx = new Effects(this.world.scene)
     this.combat = new Combat(this.world, this.fx, sfx)
     this.popups = new DamagePopups(this.world.scene)
@@ -517,7 +528,7 @@ class BattleView implements View {
   }
 
   render() {
-    renderer.render(this.world.scene, this.camera)
+    postfx.render(this.world.scene, this.camera)
   }
 
   resize() {
@@ -689,6 +700,7 @@ resumeOverlay.addEventListener('click', () => {
 
 window.addEventListener('resize', () => {
   renderer.setSize(window.innerWidth, window.innerHeight)
+  postfx.resize(window.innerWidth, window.innerHeight)
   view.resize()
 })
 

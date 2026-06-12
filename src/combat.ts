@@ -38,6 +38,7 @@ export class Effects {
     const mat = new THREE.MeshBasicMaterial({
       color, transparent: true, opacity: 0.9, blending: THREE.AdditiveBlending, depthWrite: false,
     })
+    mat.color.multiplyScalar(1.6)
     const m = new THREE.Mesh(geo, mat)
     m.position.copy(pos)
     this.push(m, 0.06, geo)
@@ -83,6 +84,7 @@ export class Effects {
     const mat = new THREE.MeshBasicMaterial({
       color, transparent: true, opacity: 0.85, blending: THREE.AdditiveBlending, depthWrite: false,
     })
+    mat.color.multiplyScalar(2.0)
     const m = new THREE.Mesh(geo, mat)
     m.position.copy(pos)
     m.scale.setScalar(0.3)
@@ -177,6 +179,7 @@ export class Combat {
       blending: THREE.AdditiveBlending,
       depthWrite: false,
     })
+    mat.color.multiplyScalar(2.6) // HDR輝度に押し上げてブルームで光らせる
     const mesh = new THREE.Mesh(geo, mat)
     mesh.position.copy(origin)
     // 進行方向に引き伸ばして光条に見せる
