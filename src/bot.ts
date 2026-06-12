@@ -37,6 +37,10 @@ export interface BotParams {
   tpMul: number
   coreSeek: boolean
   reaction: number
+  /** 新規ターゲット捕捉時のエイム誤差(人間らしい照準合わせ) */
+  aimErrInit: number
+  /** エイム誤差の収束速度(/s) */
+  aimErrDecay: number
 }
 
 export function botParams(level: number): BotParams {
@@ -54,6 +58,8 @@ export function botParams(level: number): BotParams {
     tpMul: lerp(0.6, 1.2, t),
     coreSeek: lv >= 3,
     reaction: lerp(0.9, 0.35, t),
+    aimErrInit: lerp(0.3, 0.05, t),
+    aimErrDecay: lerp(0.18, 0.55, t),
   }
 }
 
@@ -109,6 +115,7 @@ export class BotCommander implements Unit {
   private charging = false
   private prevTargetPos = new THREE.Vector3()
   private targetVel = new THREE.Vector3()
+  private aimErr = 0
 
   private flashPairs: { m: THREE.MeshStandardMaterial; color: number; intensity: number }[] = []
   private flashT = 0
@@ -181,9 +188,13 @@ export class BotCommander implements Unit {
       if (this.energy > 65) this.charging = false
     } else if (this.energy < this.char.weapon.energyCost) {
       this.charging = true
+      this.retreatToCover() // 無防備な間は遮蔽裏へ下がる
     } else if (this.lastDamaged > 1.5) {
       this.energy = Math.min(ENERGY_MAX, this.energy + 7 * dt)
     }
+
+    // エイム誤差の収束
+    this.aimErr = Math.max(0, this.aimErr - this.params.aimErrDecay * dt)
 
     if (this.thinkT <= 0) {
       this.thinkT = this.params.thinkT * (0.85 + Math.random() * 0.3)
@@ -221,8 +232,18 @@ export class BotCommander implements Unit {
     if (!cps.length) return
     let pick: THREE.Vector3 | null = null
 
+    // すぐ近くにコアがあれば機会的に拾いに行く(レベル3以上)
+    if (this.params.coreSeek && this.tp < 85) {
+      for (const c of this.world.cores) {
+        if (flatDist(c.pos, this.group.position) < 10) {
+          pick = c.pos.clone()
+          break
+        }
+      }
+    }
+
     // TPが低く、コア回収が許可されていれば最寄りのコアへ
-    if (!low && this.params.coreSeek && this.tp < 45 && this.world.cores.length) {
+    if (!pick && !low && this.params.coreSeek && this.tp < 45 && this.world.cores.length) {
       let bd = Infinity
       for (const c of this.world.cores) {
         const d = flatDist(c.pos, this.group.position)
@@ -241,7 +262,7 @@ export class BotCommander implements Unit {
           pick = p
         }
       }
-    } else {
+    } else if (!pick) {
       const cands = cps.filter((p) => {
         const d = flatDist(p, player.group.position)
         return d > 9 && d < 25
@@ -254,6 +275,28 @@ export class BotCommander implements Unit {
     }
     if (pick && (!this.moveTarget || flatDist(pick, this.moveTarget) > 1)) {
       this.moveTarget = pick.clone()
+      this.path = this.world.nav.findPath(this.group.position, this.moveTarget)
+      this.pi = 0
+    }
+  }
+
+  /** チャージ中の退避先(自分の近く・プレイヤーから今より遠いカバー) */
+  private retreatToCover() {
+    const player = this.world.commanderOf(enemyOf(this.team))
+    if (!player) return
+    const myDist = flatDist(player.group.position, this.group.position)
+    let best: THREE.Vector3 | null = null
+    let bd = Infinity
+    for (const p of this.world.coverPoints) {
+      const dSelf = flatDist(p, this.group.position)
+      const dPlayer = flatDist(p, player.group.position)
+      if (dPlayer > myDist + 2 && dSelf < bd) {
+        bd = dSelf
+        best = p
+      }
+    }
+    if (best) {
+      this.moveTarget = best.clone()
       this.path = this.world.nav.findPath(this.group.position, this.moveTarget)
       this.pi = 0
     }
@@ -287,6 +330,8 @@ export class BotCommander implements Unit {
       this.targetVel.set(0, 0, 0)
     }
     if (best) this.prevTargetPos.copy(best.group.position)
+    // 新規ターゲット捕捉時は照準合わせの誤差が乗る(徐々に収束)
+    if (best && best !== this.target) this.aimErr = this.params.aimErrInit
     this.target = best
   }
 
@@ -333,7 +378,7 @@ export class BotCommander implements Unit {
     const baseDir = aim.sub(origin).normalize()
     const muzzlePos = this.muzzle.getWorldPosition(new THREE.Vector3())
     for (let i = 0; i < w.pellets; i++) {
-      const dir = this.combat.spreadDir(baseDir, this.params.spread + w.spread * 0.5)
+      const dir = this.combat.spreadDir(baseDir, this.params.spread + w.spread * 0.5 + this.aimErr)
       this.combat.fireBolt(muzzlePos.clone(), dir, {
         damage: w.damage * this.params.dmgMul,
         team: this.team,
@@ -634,6 +679,13 @@ export class BotCommander implements Unit {
       p.m.emissiveIntensity = 0.7
     }
     this.retargetT = Math.min(this.retargetT, 0.1)
+    // 見えない敵からの被弾は横っ飛びで回避(棒立ち狙撃され対策)
+    if (!this.target && this.dashT <= 0) {
+      const ang = Math.random() * Math.PI * 2
+      this.dashDir.set(Math.cos(ang), 0, Math.sin(ang))
+      this.dashT = 0.12
+      this.thinkT = Math.min(this.thinkT, 0.4)
+    }
     if (this.hp <= 0) {
       this.hp = 0
       this.alive = false
