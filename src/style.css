@@ -57,6 +57,15 @@ body {
   text-shadow: 0 0 30px rgba(255, 79, 163, 0.8), 4px 4px 0 rgba(41, 211, 232, 0.55);
 }
 .logo span { color: var(--pink); }
+.logo-img {
+  width: min(620px, 84vw);
+  filter: drop-shadow(0 8px 28px rgba(255, 79, 163, 0.45)) drop-shadow(0 2px 8px rgba(0, 0, 0, 0.6));
+  animation: logoFloat 4s ease-in-out infinite;
+}
+@keyframes logoFloat {
+  0%, 100% { transform: translateY(0); }
+  50% { transform: translateY(-8px); }
+}
 .tagline { font-size: 17px; letter-spacing: 0.3em; color: #f0c8e2; }
 .controls-card {
   background: var(--panel); border: 1px solid var(--panel-line); border-radius: 8px;
