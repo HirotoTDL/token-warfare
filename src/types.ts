@@ -117,8 +117,8 @@ export const CHARACTERS: CharacterDef[] = [
     hp: 140, color: 0x49c46a, subColor: 0xb6ff5c, variant: 1,
     weapon: {
       name: 'ドラムバースト', desc: '6粒拡散の近距離キャノン',
-      damage: 7, pellets: 6, rate: 1.5, energyCost: 13, boltSpeed: 95,
-      falloff: [{ d: 0, mul: 1.3 }, { d: 8, mul: 1 }, { d: 18, mul: 0.5 }, { d: 30, mul: 0.2 }],
+      damage: 7, pellets: 6, rate: 1.6, energyCost: 12, boltSpeed: 100,
+      falloff: [{ d: 0, mul: 1.3 }, { d: 8, mul: 1 }, { d: 18, mul: 0.58 }, { d: 30, mul: 0.25 }],
       spread: 0.07, zoomFov: 55, recoil: 0.035, auto: true, boltColor: 0x8aff7a,
     },
     skill: { key: 'dome', name: 'バリアドーム', desc: '2.5秒間 被ダメージ-60%', cooldown: 16, duration: 2.5 },
@@ -130,8 +130,8 @@ export const CHARACTERS: CharacterDef[] = [
     hp: 95, color: 0x35c8d8, subColor: 0xc8f4ff, variant: 2,
     weapon: {
       name: 'ロングレイル', desc: '遠距離特化の貫通レール',
-      damage: 50, pellets: 1, rate: 0.9, energyCost: 16, boltSpeed: 260,
-      falloff: [{ d: 0, mul: 0.5 }, { d: 18, mul: 0.8 }, { d: 40, mul: 1.3 }, { d: 90, mul: 1.3 }],
+      damage: 50, pellets: 1, rate: 0.82, energyCost: 17, boltSpeed: 260,
+      falloff: [{ d: 0, mul: 0.45 }, { d: 18, mul: 0.75 }, { d: 40, mul: 1.2 }, { d: 90, mul: 1.2 }],
       spread: 0.002, zoomFov: 20, recoil: 0.035, auto: false, boltColor: 0x7af0ff,
     },
     skill: { key: 'cloak', name: '光学迷彩', desc: '4秒間 索敵から消える(発砲で解除)', cooldown: 18, duration: 4 },
@@ -153,11 +153,11 @@ export const CHARACTERS: CharacterDef[] = [
   {
     key: 'mimi', name: 'ミミ', gender: 'f', title: 'ハイテンション・ラッシャー', role: 'スピード/ラッシュ',
     desc: '最速で踏み込み最速で逃げる。チェイサーで敵将の居場所を暴くお祭り娘。',
-    hp: 100, color: 0xff4fa3, subColor: 0xffe2f1, variant: 4,
+    hp: 108, color: 0xff4fa3, subColor: 0xffe2f1, variant: 4,
     weapon: {
       name: 'ツインポッパー', desc: '2丁同時発射の近距離ポッパー',
-      damage: 4.6, pellets: 2, rate: 9, energyCost: 2.6, boltSpeed: 105,
-      falloff: [{ d: 0, mul: 1.25 }, { d: 6, mul: 1.1 }, { d: 16, mul: 0.7 }, { d: 35, mul: 0.4 }],
+      damage: 4.8, pellets: 2, rate: 9, energyCost: 2.5, boltSpeed: 110,
+      falloff: [{ d: 0, mul: 1.25 }, { d: 6, mul: 1.1 }, { d: 16, mul: 0.78 }, { d: 35, mul: 0.48 }],
       spread: 0.045, zoomFov: 55, recoil: 0.008, auto: true, boltColor: 0xff8fd0,
     },
     skill: { key: 'overdrive', name: 'オーバードライブ', desc: '2.5秒間 連射+60%・燃費半減', cooldown: 15, duration: 2.5 },
@@ -197,7 +197,7 @@ export const CHARACTERS: CharacterDef[] = [
     hp: 100, color: 0x5c7cff, subColor: 0xd8c8ff, variant: 7,
     weapon: {
       name: 'シーカーカービン', desc: '中遠距離で減衰しないカービン',
-      damage: 10, pellets: 1, rate: 6, energyCost: 3.0, boltSpeed: 140,
+      damage: 9.5, pellets: 1, rate: 6, energyCost: 3.1, boltSpeed: 140,
       falloff: [{ d: 0, mul: 0.7 }, { d: 15, mul: 1 }, { d: 45, mul: 1 }, { d: 80, mul: 0.7 }],
       spread: 0.014, zoomFov: 38, recoil: 0.012, auto: true, boltColor: 0x9bb4ff,
     },

@@ -19,6 +19,7 @@ import { TOKENS } from './tokens'
 import { buildCore, buildMonsterCommander } from './models'
 import { preloadModels, MODEL_MANIFEST } from './modelLoader'
 import { buildSettingsPanel, settings, onSettingsChange } from './settings'
+import { simulateMatch, simulateMatrix, summarize } from './sim'
 
 // --- 基盤 ---
 const app = document.getElementById('app')!
@@ -666,6 +667,9 @@ window.addEventListener('resize', () => {
   TOKENS,
   sfx,
   bgm,
+  sim: simulateMatch,
+  simMatrix: simulateMatrix,
+  simSummary: summarize,
 }
 
 // --- メインループ ---

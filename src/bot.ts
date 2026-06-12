@@ -2,7 +2,7 @@ import * as THREE from 'three'
 import { World } from './world'
 import { Combat } from './combat'
 import { Sfx } from './sfx'
-import { TEAM_COLOR, ENERGY_MAX, TP_REGEN_BASE, enemyOf, type CharacterDef, type Team, type Unit } from './types'
+import { TEAM_COLOR, ENERGY_MAX, TP_REGEN_BASE, enemyOf, falloffMul, type CharacterDef, type Team, type Unit } from './types'
 import { TOKENS, DecoyUnit, loadoutFor } from './tokens'
 import { buildMonsterCommander } from './models'
 import { getModel } from './modelLoader'
@@ -63,10 +63,10 @@ export function botParams(level: number): BotParams {
   }
 }
 
-/** CPU敵将(シェイプリンガー) */
+/** CPU将(シェイプリンガー)。通常は赤軍だが、シミュレーション用に青軍も可 */
 export class BotCommander implements Unit {
   id: number
-  team: Team = 'red'
+  team: Team
   kind = 'commander'
   name: string
   hp: number
@@ -121,16 +121,17 @@ export class BotCommander implements Unit {
   private flashT = 0
   private stealthMats: { m: THREE.Material; opacity: number }[] = []
 
-  constructor(world: World, combat: Combat, sfx: Sfx, char: CharacterDef, spawn: THREE.Vector3, params: BotParams) {
+  constructor(world: World, combat: Combat, sfx: Sfx, char: CharacterDef, spawn: THREE.Vector3, params: BotParams, team: Team = 'red') {
     this.world = world
     this.combat = combat
     this.sfx = sfx
     this.char = char
     this.params = params
+    this.team = team
     this.id = world.allocId()
     this.name = char.name
     this.hp = this.maxHp = char.hp
-    this.group = getModel(`char_${char.key}`, 'red') ?? buildMonsterCommander(char, 'red')
+    this.group = getModel(`char_${char.key}`, team) ?? buildMonsterCommander(char, team)
     this.group.position.copy(spawn)
     this.group.rotation.y = Math.atan2(-spawn.x, -spawn.z)
     this.muzzle = this.group.userData.muzzle as THREE.Object3D
@@ -263,9 +264,13 @@ export class BotCommander implements Unit {
         }
       }
     } else if (!pick) {
+      // 武器の得意距離帯のカバーへ寄る(近距離型は詰め、遠距離型は維持)
+      const ideal = this.idealRange()
+      const lo = Math.max(5, ideal - 6)
+      const hi = ideal + 9
       const cands = cps.filter((p) => {
         const d = flatDist(p, player.group.position)
-        return d > 9 && d < 25
+        return d > lo && d < hi
       })
       const pool = (cands.length ? cands : cps)
         .slice()
@@ -278,6 +283,16 @@ export class BotCommander implements Unit {
       this.path = this.world.nav.findPath(this.group.position, this.moveTarget)
       this.pi = 0
     }
+  }
+
+  /** 武器の威力ピーク距離 */
+  private idealRange() {
+    return this.char.weapon.falloff.reduce((acc, f) => (f.mul >= acc.mul ? f : acc)).d + 4
+  }
+
+  /** その距離での武器威力倍率 */
+  private effectiveAt(dist: number) {
+    return falloffMul(this.char.weapon.falloff, dist)
   }
 
   /** チャージ中の退避先(自分の近く・プレイヤーから今より遠いカバー) */
@@ -406,7 +421,11 @@ export class BotCommander implements Unit {
     }
     const speedMul = this.charging ? 0.5 : 1
     const t = this.target
-    if (t && t.alive && !t.stealthed && t.isCommander && !this.charging) {
+    // 自分の武器が活きる距離でのみ足を止めて撃ち合う。
+    // 射程外ならカバー伝いに距離を詰め続ける(超近距離型ほど我慢して詰める)
+    const engageThreshold = this.idealRange() < 11 ? 0.8 : 0.55
+    if (t && t.alive && !t.stealthed && t.isCommander && !this.charging &&
+        this.effectiveAt(flatDist(t.group.position, p)) >= engageThreshold) {
       const d = flatDist(t.group.position, p)
       this.strafeT -= dt
       if (this.strafeT <= 0) {
@@ -416,8 +435,7 @@ export class BotCommander implements Unit {
       const toT = t.group.position.clone().sub(p).setY(0).normalize()
       const lateral = new THREE.Vector3(-toT.z, 0, toT.x).multiplyScalar(this.strafeDir)
       const move = lateral.clone()
-      // 武器の得意距離に寄せる
-      const ideal = this.char.weapon.falloff.reduce((acc, f) => (f.mul >= acc.mul ? f : acc)).d + 4
+      const ideal = this.idealRange()
       if (d > ideal + 6) move.add(toT)
       else if (d < Math.max(6, ideal - 6)) move.sub(toT)
       move.normalize()
