@@ -128,7 +128,8 @@ export function buildArena(world: World, mapKey = 'skyhaven') {
   const dusk = mapKey === 'neondocks'
   const crystal = mapKey === 'crystalsprings'
 
-  scene.fog = new THREE.Fog(crystal ? 0xd6f0ff : dusk ? 0xd98aa6 : 0xf0dcec, 80, 460)
+  // 空気遠近: 近景はクリア、遠景は緩やかに霞ませて広大な奥行きを出す
+  scene.fog = new THREE.Fog(crystal ? 0xd6f0ff : dusk ? 0xd98aa6 : 0xf0dcec, 130, 760)
 
   // --- ライティング ---
   const sunDir = new THREE.Vector3(40, dusk ? 30 : 62, 26)
@@ -160,44 +161,60 @@ export function buildArena(world: World, mapKey = 'skyhaven') {
   scene.add(ground)
   world.obstacleMeshes.push(ground)
 
-  const rockMat = new THREE.MeshStandardMaterial({ color: 0x5a4a3c, roughness: 0.95 })
-  const rock1 = new THREE.Mesh(new THREE.BoxGeometry(68, 6, 68), rockMat)
-  rock1.position.y = -5
-  scene.add(rock1)
-  const rock2 = new THREE.Mesh(new THREE.BoxGeometry(42, 8, 42), rockMat)
-  rock2.position.y = -11
-  scene.add(rock2)
-  const rockTip = new THREE.Mesh(new THREE.ConeGeometry(18, 16, 8), rockMat)
-  rockTip.rotation.x = Math.PI
-  rockTip.position.y = -22
-  scene.add(rockTip)
+  // --- 広大な外周フィールド: プレイ範囲外にも地形が連続し、箱庭感を消す ---
+  // 小さな浮遊島の基盤を廃し、遠方まで続く大地に。プレイ床はこの上にわずかに乗る。
+  const outerMat = new THREE.MeshStandardMaterial({ map: groundTexture(), roughness: 0.92, metalness: 0.04 })
+  applyExtTexture(outerMat, crystal ? 'tex_ground_crystal' : dusk ? 'tex_ground_dusk' : 'tex_ground', [86, 86])
+  const outer = new THREE.Mesh(new THREE.PlaneGeometry(560, 560), outerMat)
+  outer.rotation.x = -Math.PI / 2
+  outer.position.y = -0.04
+  outer.receiveShadow = true
+  scene.add(outer)
 
-  // --- ネオンエッジ+境界ホロフェンス ---
-  for (let i = 0; i < 4; i++) {
-    const neonMat = new THREE.MeshStandardMaterial({
-      color: i % 2 ? 0xff4fa3 : 0x29d3e8,
-      emissive: i % 2 ? 0xff4fa3 : 0x29d3e8,
-      emissiveIntensity: 1.4,
-    })
-    const strip = new THREE.Mesh(new THREE.BoxGeometry(half * 2, 0.14, 0.14), neonMat)
-    strip.position.y = 0.07
-    if (i === 0) strip.position.z = half + 1.9
-    if (i === 1) strip.position.z = -half - 1.9
-    if (i === 2) { strip.position.x = half + 1.9; strip.rotation.y = Math.PI / 2 }
-    if (i === 3) { strip.position.x = -half - 1.9; strip.rotation.y = Math.PI / 2 }
-    scene.add(strip)
-
-    const fenceMat = new THREE.MeshBasicMaterial({
-      color: i % 2 ? 0xff4fa3 : 0x29d3e8,
-      transparent: true, opacity: 0.06, side: THREE.DoubleSide, depthWrite: false,
-    })
-    const f = new THREE.Mesh(new THREE.PlaneGeometry(half * 2, 4), fenceMat)
-    f.position.y = 2
-    if (i === 0) f.position.z = half
-    if (i === 1) f.position.z = -half
-    if (i === 2) { f.position.x = half; f.rotation.y = Math.PI / 2 }
-    if (i === 3) { f.position.x = -half; f.rotation.y = Math.PI / 2 }
-    scene.add(f)
+  // --- 境界の曖昧化: 硬い壁を廃し、散在する草叢・花・小岩で縁をぼかす ---
+  // プレイ縁(half)を「線」として見せず、外側へ不規則に植生を散らして大地に溶かす。
+  {
+    const tuftGeo = new THREE.ConeGeometry(0.6, 1.5, 5)
+    const bushGeo = new THREE.SphereGeometry(0.9, 7, 6)
+    const tuftMats = [0x8fe39a, 0xa7e8b0, 0x7fd6c0, 0x9be0a8].map(
+      (c) => new THREE.MeshStandardMaterial({ color: c, roughness: 0.95 }),
+    )
+    const flowerMats = [0xff9ec7, 0xc6a7ff, 0xfff1a8, 0xffffff, 0x9fe8ff].map(
+      (c) => new THREE.MeshStandardMaterial({ color: c, emissive: c, emissiveIntensity: 0.35, roughness: 0.6 }),
+    )
+    const rockMat2 = new THREE.MeshStandardMaterial({ color: 0x97a6b8, roughness: 0.95 })
+    for (let i = 0; i < 150; i++) {
+      const ang = Math.random() * Math.PI * 2
+      // プレイ縁付近を濃く、外へ向かって疎に(pow>1 で内側に偏らせる)
+      const rad = half - 2 + Math.pow(Math.random(), 1.7) * 120
+      const x = Math.cos(ang) * rad
+      const z = Math.sin(ang) * rad
+      const s = 0.7 + Math.random() * 2.0
+      const tuft = new THREE.Mesh(tuftGeo, tuftMats[i % tuftMats.length])
+      tuft.scale.set(s, s * (1 + Math.random() * 1.2), s)
+      tuft.position.set(x, s * 0.75, z)
+      tuft.castShadow = true
+      scene.add(tuft)
+      if (i % 3 === 0) {
+        const bush = new THREE.Mesh(bushGeo, tuftMats[(i + 1) % tuftMats.length])
+        const bs = 0.8 + Math.random() * 1.6
+        bush.scale.set(bs, bs * 0.7, bs)
+        bush.position.set(x + (Math.random() - 0.5) * 2, bs * 0.5, z + (Math.random() - 0.5) * 2)
+        bush.castShadow = true
+        scene.add(bush)
+      }
+      if (i % 2 === 0) {
+        const fl = new THREE.Mesh(new THREE.SphereGeometry(0.16 * s, 6, 5), flowerMats[i % flowerMats.length])
+        fl.position.set(x + (Math.random() - 0.5) * 1.5, 0.22 * s, z + (Math.random() - 0.5) * 1.5)
+        scene.add(fl)
+      }
+      if (i % 5 === 0) {
+        const rk = new THREE.Mesh(new THREE.DodecahedronGeometry(0.5 + Math.random()), rockMat2)
+        rk.position.set(x + (Math.random() - 0.5) * 3, 0.3, z + (Math.random() - 0.5) * 3)
+        rk.rotation.set(Math.random(), Math.random(), Math.random())
+        scene.add(rk)
+      }
+    }
   }
 
   // --- 障害物 ---
@@ -549,28 +566,59 @@ export function buildArena(world: World, mapKey = 'skyhaven') {
     })
   }
 
-  // --- 遠景の浮遊岩 ---
-  const farMat = new THREE.MeshStandardMaterial({ color: 0x6e8096, roughness: 0.9 })
+  // --- 遠景: 広大な世界を示す大型オブジェクト群(空気遠近でフォグに溶ける) ---
+  const landMat = new THREE.MeshStandardMaterial({ color: crystal ? 0x9fb8d4 : dusk ? 0x6a5a7e : 0x8aa6c4, roughness: 0.96 })
+  const foliMat = new THREE.MeshStandardMaterial({ color: crystal ? 0xaadbe6 : dusk ? 0x4f7060 : 0x74bd92, roughness: 0.95 })
+  const trunkMat = new THREE.MeshStandardMaterial({ color: dusk ? 0x6a5340 : 0x8a6a52, roughness: 1 })
   const floaters: { g: THREE.Group; phase: number; amp: number }[] = []
-  for (let i = 0; i < 9; i++) {
+
+  // 大型浮遊島のリング(空に世界が続く印象。様々な高さ・大きさ)
+  for (let i = 0; i < 14; i++) {
+    const a = (i / 14) * Math.PI * 2 + 0.3
+    const r = 155 + (i % 4) * 72 + ((i * 23) % 55)
+    const s = 14 + ((i * 11) % 28)
     const g = new THREE.Group()
-    const a = (i / 9) * Math.PI * 2 + 0.4
-    const r = 130 + (i % 3) * 55 + (i * 13) % 30
-    const s = 6 + (i * 7) % 12
-    const rock = new THREE.Mesh(new THREE.BoxGeometry(s, s * 0.5, s * 0.8), farMat)
-    const tip = new THREE.Mesh(new THREE.ConeGeometry(s * 0.4, s * 0.7, 6), farMat)
-    tip.rotation.x = Math.PI
-    tip.position.y = -s * 0.55
-    const top = new THREE.Mesh(new THREE.BoxGeometry(s * 0.7, s * 0.2, s * 0.6), farMat)
-    top.position.y = s * 0.32
-    g.add(rock, tip, top)
-    g.position.set(Math.cos(a) * r, -14 + ((i * 17) % 46), Math.sin(a) * r)
+    const base = new THREE.Mesh(new THREE.CylinderGeometry(s * 0.9, s * 0.18, s * 0.8, 7), landMat)
+    const top = new THREE.Mesh(new THREE.CylinderGeometry(s, s * 0.92, s * 0.28, 7), foliMat)
+    top.position.y = s * 0.5
+    const tip = new THREE.Mesh(new THREE.ConeGeometry(s * 0.34, s * 0.9, 6), foliMat)
+    tip.position.y = s * 1.0
+    g.add(base, top, tip)
+    g.position.set(Math.cos(a) * r, 8 + ((i * 17) % 78) - 34, Math.sin(a) * r)
     g.rotation.y = a * 2
     scene.add(g)
-    floaters.push({ g, phase: i * 1.7, amp: 0.8 + (i % 3) * 0.5 })
+    floaters.push({ g, phase: i * 1.5, amp: 0.8 + (i % 3) * 0.6 })
   }
+
+  // 巨大樹(プレイ外周。広大な森の縁にいる印象)
+  for (let i = 0; i < 9; i++) {
+    const a = (i / 9) * Math.PI * 2 + 0.9
+    const r = 72 + (i % 3) * 24
+    const h = 26 + ((i * 7) % 22)
+    const x = Math.cos(a) * r
+    const z = Math.sin(a) * r
+    const trunk = new THREE.Mesh(new THREE.CylinderGeometry(h * 0.06, h * 0.13, h, 7), trunkMat)
+    trunk.position.set(x, h / 2, z)
+    trunk.castShadow = true
+    const crown = new THREE.Mesh(new THREE.SphereGeometry(h * 0.44, 8, 7), foliMat)
+    crown.position.set(x, h * 0.95, z)
+    crown.scale.y = 1.2
+    scene.add(trunk, crown)
+  }
+
+  // 遠方の山/丘の影(地平を埋め、世界の果てを霞ませる)
+  for (let i = 0; i < 18; i++) {
+    const a = (i / 18) * Math.PI * 2 + 0.15
+    const r = 370 + ((i * 29) % 170)
+    const s = 64 + ((i * 37) % 96)
+    const hill = new THREE.Mesh(new THREE.ConeGeometry(s, s * 0.75, 6), landMat)
+    hill.position.set(Math.cos(a) * r, -10, Math.sin(a) * r)
+    hill.rotation.y = i
+    scene.add(hill)
+  }
+
   updates.push((_dt, t) => {
-    for (const f of floaters) f.g.position.y += Math.sin(t * 0.35 + f.phase) * 0.004 * f.amp
+    for (const f of floaters) f.g.position.y += Math.sin(t * 0.3 + f.phase) * 0.004 * f.amp
   })
 
   // --- フェアリィ装飾構造物(プレイ範囲外のランドマーク) ---
