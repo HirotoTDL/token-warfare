@@ -337,53 +337,94 @@ export function buildArena(world: World, mapKey = 'skyhaven') {
       new THREE.Vector3(22, 0, -18), new THREE.Vector3(-22, 0, 18),
     ]
   } else {
-    // ===== スカイヘイヴン: 中央監視塔+十字遮蔽 =====
-    crate(10, 8, 2.2); crate(-10, -8, 2.2)
-    crate(-12, 14, 2.0); crate(12, -14, 2.0)
-    crate(22, 3, 2.4); crate(-22, -3, 2.4)
-    crate(5, 22, 1.8); crate(-5, -22, 1.8)
-    crate(18, 18, 2.0); crate(-18, -18, 2.0)
-    crate(16, -22, 1.8); crate(-16, 22, 1.8)
-    crate(27, -12, 2.0); crate(-27, 12, 2.0)
-    crate(9.7, 8.2, 1.2); crate(-9.7, -8.2, 1.2)
-
-    wall(0, 13, 7, 0.9); wall(0, -13, 7, 0.9)
-    wall(13, 0, 0.9, 7); wall(-13, 0, 0.9, 7)
-    wall(26, 20, 6, 0.9, 2.2); wall(-26, -20, 6, 0.9, 2.2)
-    wall(30, -2, 0.9, 6, 2.2); wall(-30, 2, 0.9, 6, 2.2)
-
-    barrel(12.2, 2.4); barrel(13.1, 3.1); barrel(-12.2, -2.4); barrel(3.2, -24); barrel(-3.2, 24)
-
-    // 中央監視塔
-    for (const [px, pz] of [[2.9, 2.9], [-2.9, 2.9], [2.9, -2.9], [-2.9, -2.9]] as const) {
-      solid(new THREE.BoxGeometry(1.15, 5.6, 1.15), pillarMat, px, 2.8, pz, aabb(px, pz, 1.15, 5.6, 1.15))
+    // ===== スカイガーデン(立体構造・高所争奪): 中央コマンドデッキ＋段差＋四隅足場 =====
+    // プラットフォーム素材(後でテクスチャ張替)。上に立てる箱コライダー。
+    const deckMat = new THREE.MeshStandardMaterial({ color: 0xb9c4d4, roughness: 0.7, metalness: 0.25 })
+    const stepMat = new THREE.MeshStandardMaterial({ color: 0x9aa6ba, roughness: 0.72, metalness: 0.2 })
+    // 床から topY までの箱。上面に乗れる(プレイヤー)。
+    const platform = (cx: number, cz: number, w: number, d: number, topY: number, mat = deckMat) => {
+      solid(new THREE.BoxGeometry(w, topY, d), mat, cx, topY / 2, cz, aabb(cx, cz, w, topY, d))
     }
-    const roof = new THREE.Mesh(new THREE.BoxGeometry(8.6, 0.5, 8.6), wallMat)
-    roof.position.y = 5.85
+    // 高所の縁に置く胸壁(遮蔽)。baseYは床面の高さ。
+    const parapet = (cx: number, cz: number, w: number, d: number, baseY: number, h = 1.1) => {
+      solid(new THREE.BoxGeometry(w, h, d), wallMat, cx, baseY + h / 2, cz, {
+        min: new THREE.Vector3(cx - w / 2, baseY, cz - d / 2),
+        max: new THREE.Vector3(cx + w / 2, baseY + h, cz + d / 2),
+      }, false)
+    }
+
+    // --- 中央コマンドデッキ(高所拠点 top=2.4, 12x12)。中央を取ると有利、3方向から登れる ---
+    const DECK = 2.4
+    platform(0, 0, 12, 12, DECK)
+    // 登り口ステップ(各≤1.1mでジャンプ登攀可)。北/南東/南西の3ルート
+    platform(0, 8.4, 5.5, 2.0, 0.8, stepMat); platform(0, 6.9, 5.5, 2.2, 1.6, stepMat)
+    platform(8.4, -5.0, 2.0, 5.5, 0.8, stepMat); platform(6.9, -5.0, 2.2, 5.5, 1.6, stepMat)
+    platform(-8.4, -5.0, 2.0, 5.5, 0.8, stepMat); platform(-6.9, -5.0, 2.2, 5.5, 1.6, stepMat)
+    // デッキ上の胸壁(四辺の遮蔽。中央は開けて撃ち合い)
+    parapet(0, 5.6, 7.5, 0.5, DECK); parapet(0, -5.6, 7.5, 0.5, DECK)
+    parapet(5.6, 0, 0.5, 7.5, DECK); parapet(-5.6, 0, 0.5, 7.5, DECK)
+
+    // --- 左右フランク台(top=1.6, 中段の回り込み+遮蔽) ---
+    for (const sx of [1, -1]) {
+      platform(sx * 16, 2, 6, 7, 1.6); platform(sx * 16, 6.0, 4.5, 1.8, 0.8, stepMat)
+      parapet(sx * 16, -1.4, 6, 0.5, 1.6)
+    }
+
+    // --- 四隅スナイパー足場(top=2.4, 長射線・露出リスク) ---
+    for (const [sx, sz] of [[1, 1], [-1, -1], [1, -1], [-1, 1]] as const) {
+      platform(sx * 24, sz * 24, 6, 6, 2.4)
+      platform(sx * 20.5, sz * 24, 2.0, 5, 0.9, stepMat); platform(sx * 22.2, sz * 24, 2.0, 5, 1.7, stepMat)
+      parapet(sx * 24, sz * 26.0, 6, 0.5, 2.4, 1.0)
+      parapet(sx * 26.0, sz * 24, 0.5, 6, 2.4, 1.0)
+    }
+
+    // --- 地上の多層遮蔽(低い箱=飛び乗り可 / 中段の壁=射線カット) ---
+    crate(11, -10, 1.1); crate(-11, 10, 1.1)
+    crate(20, -8, 1.2); crate(-20, 8, 1.2)
+    crate(9, 16, 2.0); crate(-9, -16, 2.0)
+    crate(15, 14, 1.1); crate(-15, -14, 1.1)
+    wall(0, 20, 6, 0.9, 2.2); wall(0, -20, 6, 0.9, 2.2)
+    wall(28, 10, 0.9, 6, 2.2); wall(-28, -10, 0.9, 6, 2.2)
+    barrel(12.5, 12.5); barrel(-12.5, -12.5); barrel(19, 0); barrel(-19, 0)
+
+    // --- 中央監視塔(デッキ上に屹立。ランドマーク+最上部の見張り台) ---
+    for (const [px, pz] of [[2.6, 2.6], [-2.6, 2.6], [2.6, -2.6], [-2.6, -2.6]] as const) {
+      solid(new THREE.BoxGeometry(1.0, 3.4, 1.0), pillarMat, px, DECK + 1.7, pz, {
+        min: new THREE.Vector3(px - 0.5, DECK, pz - 0.5),
+        max: new THREE.Vector3(px + 0.5, DECK + 3.4, pz + 0.5),
+      }, false)
+    }
+    const roof = new THREE.Mesh(new THREE.BoxGeometry(7.2, 0.5, 7.2), wallMat)
+    roof.position.y = DECK + 3.85
     roof.castShadow = true
     roof.receiveShadow = true
     scene.add(roof)
     world.obstacleMeshes.push(roof)
     const neonRing = new THREE.Mesh(
-      new THREE.TorusGeometry(4.6, 0.08, 8, 40),
+      new THREE.TorusGeometry(3.9, 0.08, 8, 40),
       new THREE.MeshStandardMaterial({ color: 0xff4fa3, emissive: 0xff4fa3, emissiveIntensity: 1.6 }),
     )
     neonRing.rotation.x = Math.PI / 2
-    neonRing.position.y = 6.2
+    neonRing.position.y = DECK + 4.2
     scene.add(neonRing)
-    const antenna = new THREE.Mesh(new THREE.CylinderGeometry(0.05, 0.09, 3.2, 8), pillarMat)
-    antenna.position.y = 7.7
-    scene.add(antenna)
     const beacon = new THREE.Mesh(
       new THREE.SphereGeometry(0.16, 10, 8),
       new THREE.MeshStandardMaterial({ color: 0xffffff, emissive: 0xff4040, emissiveIntensity: 2 }),
     )
-    beacon.position.y = 9.4
+    beacon.position.y = DECK + 5.0
     scene.add(beacon)
     updates.push((_dt, t) => {
       ;(beacon.material as THREE.MeshStandardMaterial).emissiveIntensity = 1.2 + Math.sin(t * 4) * 1.0
     })
-    emblemAt(0, 3.4, 0)
+    emblemAt(0, DECK + 1.0, 0)
+
+    // コア出現スポット(地上+高所デッキで縦の駆け引き)
+    world.coreSpots = [
+      new THREE.Vector3(0, DECK, 0), new THREE.Vector3(16, 1.6, 2), new THREE.Vector3(-16, 1.6, 2),
+      new THREE.Vector3(0, 0, 22), new THREE.Vector3(0, 0, -22),
+      new THREE.Vector3(22, 0, -8), new THREE.Vector3(-22, 0, 8),
+      new THREE.Vector3(24, 2.4, 24), new THREE.Vector3(-24, 2.4, -24),
+    ]
   }
 
   // --- 両軍基地 ---
