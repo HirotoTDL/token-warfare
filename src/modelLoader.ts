@@ -119,4 +119,6 @@ export const MODEL_MANIFEST: { key: string; height: number }[] = [
   // ステージ装飾構造物(フェアリィ世界観)
   { key: 'struct_tower', height: 14 }, { key: 'struct_house', height: 6 },
   { key: 'struct_arch', height: 8 },
+  // FP武器ビューモデル(高さ正規化はビューモデル側で再調整)
+  { key: 'weapon_blaster', height: 0.4 },
 ]

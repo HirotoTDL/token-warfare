@@ -11,12 +11,43 @@ import {
 } from './types'
 import { TOKENS, DecoyUnit, loadoutFor } from './tokens'
 import { buildViewmodel } from './models'
+import { getScenery } from './modelLoader'
 import { settings } from './settings'
 
 const GRAVITY = 20
 const EYE = 1.6
 const HALF = 0.4
 const HEIGHT = 1.7
+
+/**
+ * FP武器ビューモデルを作る。フェアリィ・エネルギーブラスターのGLBが
+ * ロード済みならそれを使い(銃口を-Zへ正規化・先端にマズル)、
+ * 無ければ従来のプロシージャル武器(キャラ別)にフォールバックする。
+ */
+function buildWeaponViewmodel(char: CharacterDef): THREE.Group {
+  const glb = getScenery('weapon_blaster')
+  if (!glb) return buildViewmodel(char)
+  // 元モデルは銃身が左(-X)向き → -Z(前方)へ回転
+  glb.rotation.set(0, -Math.PI / 2, 0)
+  const box = new THREE.Box3().setFromObject(glb)
+  const size = box.getSize(new THREE.Vector3())
+  const s = 0.46 / Math.max(0.001, size.z, size.x)
+  glb.scale.setScalar(s)
+  const c = new THREE.Box3().setFromObject(glb).getCenter(new THREE.Vector3())
+  glb.position.sub(c)
+  glb.traverse((o) => {
+    const m = o as THREE.Mesh
+    if (m.isMesh) { m.castShadow = false; m.receiveShadow = false }
+  })
+  const wrap = new THREE.Group()
+  wrap.add(glb)
+  const muzzleZ = new THREE.Box3().setFromObject(glb).min.z - 0.02
+  const muzzle = new THREE.Object3D()
+  muzzle.position.set(0, 0, muzzleZ)
+  wrap.add(muzzle)
+  wrap.userData.muzzle = muzzle
+  return wrap
+}
 
 export class PlayerCommander implements Unit {
   id: number
@@ -108,7 +139,7 @@ export class PlayerCommander implements Unit {
     this.hitMeshes = [hitbox]
     this.group.position.copy(this.pos)
 
-    this.viewmodel = buildViewmodel(char)
+    this.viewmodel = buildWeaponViewmodel(char)
     this.viewmodel.scale.setScalar(0.8)
     this.viewmodel.position.set(0.22, -0.2, -0.48)
     this.muzzle = this.viewmodel.userData.muzzle as THREE.Object3D
