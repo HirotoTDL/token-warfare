@@ -203,6 +203,8 @@ export function buildArena(world: World, mapKey = 'skyhaven') {
   // --- 障害物 ---
   const graffiti = graffitiTexture()
   const wallMat = new THREE.MeshStandardMaterial({ map: graffiti, roughness: 0.6, metalness: 0.2 })
+  // 壁・胸壁・屋根をフェアリィ世界観のクリスタルパネルに統一(旧パンク落書きを置換)
+  applyExtTexture(wallMat, 'tex_crate', [1, 1])
   let crateIdx = 0
 
   function solid(geo: THREE.BufferGeometry, mat: THREE.Material, cx: number, cy: number, cz: number, box: AABB, cover = true) {
@@ -341,6 +343,8 @@ export function buildArena(world: World, mapKey = 'skyhaven') {
     // プラットフォーム素材(後でテクスチャ張替)。上に立てる箱コライダー。
     const deckMat = new THREE.MeshStandardMaterial({ color: 0xb9c4d4, roughness: 0.7, metalness: 0.25 })
     const stepMat = new THREE.MeshStandardMaterial({ color: 0x9aa6ba, roughness: 0.72, metalness: 0.2 })
+    applyExtTexture(deckMat, 'tex_deck', [3, 3])
+    applyExtTexture(stepMat, 'tex_step', [2, 1])
     // 床から topY までの箱。上面に乗れる(プレイヤー)。
     const platform = (cx: number, cz: number, w: number, d: number, topY: number, mat = deckMat) => {
       solid(new THREE.BoxGeometry(w, topY, d), mat, cx, topY / 2, cz, aabb(cx, cz, w, topY, d))
