@@ -168,6 +168,10 @@ class MenuView implements View {
     this.sky.update(this.t)
     this.arena.update(dt, this.t)
 
+    // 起動時に未ロードだったGLBが揃い次第、プロシージャル表示をフェアリィGLBへ差し替える
+    // (タイトル/ホーム画面でも反映されるよう、全員GLBになるまで毎フレーム試行)
+    if (this.monsterIsGlb.some((b) => !b)) this.refreshGlbModels()
+
     // モンスターのアイドル挙動
     this.monsters.forEach((m, i) => {
       let baseY = Math.max(0, m.position.y + this.hopV[i] * dt)
