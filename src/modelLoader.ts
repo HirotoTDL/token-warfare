@@ -89,7 +89,30 @@ export function getModel(key: string, team: Team): THREE.Group | null {
   muzzle.position.set(0.3, 1.0, 0.5)
   clone.add(muzzle)
   clone.userData.muzzle = muzzle
+  // プロシージャル・モーション用に内部ボディノードを登録(リグ無しGLB向け)。
+  // children[0] が正規化済みモデル本体(リング/マズルは別の子)。
+  const body = clone.children[0]
+  if (body) {
+    body.userData.baseY = body.position.y
+    clone.userData.body = body
+  }
   return clone
+}
+
+/**
+ * リグ無しGLBモデル(妖精キャラ)の体全体プロシージャル・モーション。
+ * 妖精らしいふわふわホバー(常時)＋移動時の上下バウンス＋前傾・左右バンク。
+ * group.userData.body(正規化済みモデル本体)に適用。脚/腕アニメは別系統。
+ */
+export function animateGlbBody(group: THREE.Group, animT: number, animAmp: number) {
+  const body = group.userData.body as THREE.Object3D | undefined
+  if (!body) return
+  const baseY = (body.userData.baseY as number) ?? 0
+  const hover = Math.sin(animT * 0.5) * 0.05
+  const bounce = Math.abs(Math.sin(animT)) * 0.12 * animAmp
+  body.position.y = baseY + hover + bounce
+  body.rotation.x = 0.16 * animAmp
+  body.rotation.z = Math.sin(animT * 0.5) * 0.06 * animAmp
 }
 
 /**

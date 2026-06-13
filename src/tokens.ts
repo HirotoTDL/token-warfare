@@ -7,7 +7,7 @@ import {
   buildGunner, buildSentry, buildHealDrone, buildStriker, buildSpiderMine,
   buildWall, buildBooster, buildChaser, buildBomber, buildJammer, buildSniperDrone, buildDecoy,
 } from './models'
-import { getModel } from './modelLoader'
+import { getModel, animateGlbBody } from './modelLoader'
 
 /** GLB(外部生成モデル)があれば優先、無ければプロシージャル */
 function resolveModel(key: string, team: Team, fallback: () => THREE.Group): THREE.Group {
@@ -146,7 +146,6 @@ export abstract class TokenUnit implements Unit {
   /** 移動速度に応じた歩行アニメ(モデルにanim情報がある場合のみ) */
   protected updateWalkAnim(dt: number) {
     const anim = this.group.userData.anim as { legs: THREE.Group[]; arms: THREE.Group[] } | undefined
-    if (!anim) return
     const p = this.group.position
     if (!this.animPrev) this.animPrev = p.clone()
     const dx = p.x - this.animPrev.x
@@ -156,13 +155,17 @@ export abstract class TokenUnit implements Unit {
     const targetAmp = Math.min(1, speed / 3)
     this.animAmp += (targetAmp - this.animAmp) * Math.min(1, dt * 10)
     this.animT += dt * (5 + speed * 2.0)
-    anim.legs.forEach((leg, i) => {
-      const phase = ((i + (i >> 1)) % 2) * Math.PI // 2脚=交互 / 4脚=対角トロット
-      leg.rotation.x = Math.sin(this.animT + phase) * 0.7 * this.animAmp
-    })
-    anim.arms.forEach((arm, i) => {
-      arm.rotation.x = Math.sin(this.animT + Math.PI + (i % 2) * Math.PI) * 0.5 * this.animAmp
-    })
+    if (anim) {
+      anim.legs.forEach((leg, i) => {
+        const phase = ((i + (i >> 1)) % 2) * Math.PI // 2脚=交互 / 4脚=対角トロット
+        leg.rotation.x = Math.sin(this.animT + phase) * 0.7 * this.animAmp
+      })
+      anim.arms.forEach((arm, i) => {
+        arm.rotation.x = Math.sin(this.animT + Math.PI + (i % 2) * Math.PI) * 0.5 * this.animAmp
+      })
+      return
+    }
+    animateGlbBody(this.group, this.animT, this.animAmp)
   }
 
   protected faceDir(dir: THREE.Vector3, dt: number) {

@@ -5,7 +5,7 @@ import { Sfx } from './sfx'
 import { TEAM_COLOR, ENERGY_MAX, TP_REGEN_BASE, enemyOf, falloffMul, type CharacterDef, type Team, type Unit } from './types'
 import { TOKENS, DecoyUnit, loadoutFor } from './tokens'
 import { buildMonsterCommander } from './models'
-import { getModel } from './modelLoader'
+import { getModel, animateGlbBody } from './modelLoader'
 
 function flatDist(a: THREE.Vector3, b: THREE.Vector3) {
   const dx = a.x - b.x
@@ -471,7 +471,6 @@ export class BotCommander implements Unit {
   /** 移動速度に応じた歩行アニメ */
   private updateWalkAnim(dt: number) {
     const anim = this.group.userData.anim as { legs: THREE.Group[]; arms: THREE.Group[] } | undefined
-    if (!anim) return
     const p = this.group.position
     if (!this.animPrev) this.animPrev = p.clone()
     const dx = p.x - this.animPrev.x
@@ -481,12 +480,16 @@ export class BotCommander implements Unit {
     const targetAmp = Math.min(1, speed / 3.2)
     this.animAmp += (targetAmp - this.animAmp) * Math.min(1, dt * 10)
     this.animT += dt * (5 + speed * 2.0)
-    anim.legs.forEach((leg, i) => {
-      leg.rotation.x = Math.sin(this.animT + (i % 2) * Math.PI) * 0.7 * this.animAmp
-    })
-    anim.arms.forEach((arm, i) => {
-      arm.rotation.x = Math.sin(this.animT + (i % 2) * Math.PI) * 0.5 * this.animAmp
-    })
+    if (anim) {
+      anim.legs.forEach((leg, i) => {
+        leg.rotation.x = Math.sin(this.animT + (i % 2) * Math.PI) * 0.7 * this.animAmp
+      })
+      anim.arms.forEach((arm, i) => {
+        arm.rotation.x = Math.sin(this.animT + (i % 2) * Math.PI) * 0.5 * this.animAmp
+      })
+      return
+    }
+    animateGlbBody(this.group, this.animT, this.animAmp)
   }
 
   private collide() {
