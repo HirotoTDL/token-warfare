@@ -115,8 +115,9 @@ export interface MapInfo {
 }
 
 export const MAPS: MapInfo[] = [
-  { key: 'skyhaven', name: 'スカイヘイヴン', desc: '中央監視塔と十字の遮蔽。バランス型' },
-  { key: 'neondocks', name: 'ネオンドックス', desc: '夕暮れの大通り。長い射線と側道の裏取り' },
+  { key: 'skyhaven', name: 'スカイガーデン', desc: '天空の花畑。中央監視塔と十字の遮蔽。バランス型' },
+  { key: 'neondocks', name: 'トワイライトフォレスト', desc: '夜の魔法の森。長い射線と側道の裏取り' },
+  { key: 'crystalsprings', name: 'クリスタルスプリング', desc: '妖精の泉。中央クリスタルと対角の遮蔽。開けた撃ち合い' },
 ]
 
 export function buildArena(world: World, mapKey = 'skyhaven') {
@@ -124,12 +125,13 @@ export function buildArena(world: World, mapKey = 'skyhaven') {
   const half = world.arenaHalf
   const updates: ((dt: number, t: number) => void)[] = []
   const dusk = mapKey === 'neondocks'
+  const crystal = mapKey === 'crystalsprings'
 
-  scene.fog = new THREE.Fog(dusk ? 0xd98aa6 : 0xf0dcec, 80, 460)
+  scene.fog = new THREE.Fog(crystal ? 0xd6f0ff : dusk ? 0xd98aa6 : 0xf0dcec, 80, 460)
 
   // --- ライティング ---
   const sunDir = new THREE.Vector3(40, dusk ? 30 : 62, 26)
-  const sun = new THREE.DirectionalLight(dusk ? 0xffc090 : 0xfff2e0, dusk ? 2.3 : 2.7)
+  const sun = new THREE.DirectionalLight(crystal ? 0xeaf6ff : dusk ? 0xffc090 : 0xfff2e0, crystal ? 2.85 : dusk ? 2.3 : 2.7)
   sun.position.copy(sunDir)
   sun.castShadow = true
   sun.shadow.mapSize.set(2048, 2048)
@@ -141,7 +143,7 @@ export function buildArena(world: World, mapKey = 'skyhaven') {
   sun.shadow.camera.far = 180
   sun.shadow.bias = -0.0004
   scene.add(sun)
-  scene.add(new THREE.HemisphereLight(dusk ? 0x9a86c8 : 0xc8d8f5, dusk ? 0x55384a : 0x5a4a50, dusk ? 0.75 : 0.8))
+  scene.add(new THREE.HemisphereLight(crystal ? 0xd2f2ff : dusk ? 0x9a86c8 : 0xc8d8f5, crystal ? 0x9cc8e4 : dusk ? 0x55384a : 0x5a4a50, crystal ? 0.9 : dusk ? 0.75 : 0.8))
 
   // --- 浮遊島本体 ---
   const groundMat = new THREE.MeshStandardMaterial({
@@ -150,7 +152,7 @@ export function buildArena(world: World, mapKey = 'skyhaven') {
     metalness: 0.1,
   })
   // AI生成の地面テクスチャがあれば差し替え(無ければプロシージャル)
-  applyExtTexture(groundMat, dusk ? 'tex_ground_dusk' : 'tex_ground', [11, 11])
+  applyExtTexture(groundMat, crystal ? 'tex_ground_crystal' : dusk ? 'tex_ground_dusk' : 'tex_ground', [11, 11])
   const ground = new THREE.Mesh(new THREE.BoxGeometry(half * 2 + 4, 2, half * 2 + 4), groundMat)
   ground.position.y = -1
   ground.receiveShadow = true
@@ -303,6 +305,36 @@ export function buildArena(world: World, mapKey = 'skyhaven') {
       new THREE.Vector3(24, 0, 16), new THREE.Vector3(-24, 0, -16),
       new THREE.Vector3(24, 0, -16), new THREE.Vector3(-24, 0, 16),
     ]
+  } else if (crystal) {
+    // ===== クリスタルスプリング: 中央クリスタル群+対角クリスタル壁 =====
+    const crystalMat = new THREE.MeshStandardMaterial({
+      color: 0x9fe8ff, emissive: 0x4fc6ff, emissiveIntensity: 0.55,
+      metalness: 0.2, roughness: 0.22, transparent: true, opacity: 0.92,
+    })
+    // 中央の大クリスタル群(登れない遮蔽。各シャードを衝突体に)
+    for (const [px, pz, h] of [[0, 0, 5.6], [2.7, 1.5, 3.8], [-2.5, 1.7, 3.3], [1.9, -2.3, 3.1], [-2.1, -2.1, 3.6]] as const) {
+      solid(new THREE.ConeGeometry(h * 0.34, h, 6), crystalMat, px, h / 2, pz, aabb(px, pz, h * 0.6, h, h * 0.6))
+    }
+    emblemAt(0, 4.6, 0)
+    // 対角のクリスタル壁(射線カット)
+    wall(10, 10, 0.9, 8, 2.4); wall(-10, -10, 0.9, 8, 2.4)
+    wall(10, -10, 8, 0.9, 2.4); wall(-10, 10, 8, 0.9, 2.4)
+    // 外周の散開クレート
+    crate(16, 4, 2.2); crate(-16, -4, 2.2)
+    crate(6, 18, 2.0); crate(-6, -18, 2.0)
+    crate(22, -14, 2.4); crate(-22, 14, 2.4)
+    crate(24, 12, 1.8); crate(-24, -12, 1.8)
+    crate(14, -22, 2.0); crate(-14, 22, 2.0)
+    crate(15.6, 4.4, 1.1); crate(-15.6, -4.4, 1.1)
+    // コーナーバリケード+バレル
+    wall(27, 22, 6, 0.9, 2.2); wall(-27, -22, 6, 0.9, 2.2)
+    barrel(12, 12); barrel(-12, -12); barrel(0, 20); barrel(0, -20)
+    world.coreSpots = [
+      new THREE.Vector3(0, 0, 15), new THREE.Vector3(0, 0, -15),
+      new THREE.Vector3(18, 0, 0), new THREE.Vector3(-18, 0, 0),
+      new THREE.Vector3(22, 0, 18), new THREE.Vector3(-22, 0, -18),
+      new THREE.Vector3(22, 0, -18), new THREE.Vector3(-22, 0, 18),
+    ]
   } else {
     // ===== スカイヘイヴン: 中央監視塔+十字遮蔽 =====
     crate(10, 8, 2.2); crate(-10, -8, 2.2)
@@ -454,7 +486,7 @@ export function buildArena(world: World, mapKey = 'skyhaven') {
     const pGeo = new THREE.BufferGeometry()
     pGeo.setAttribute('position', new THREE.BufferAttribute(pos, 3))
     const pMat = new THREE.PointsMaterial({
-      color: dusk ? 0xffa0c8 : 0xaee8ff,
+      color: crystal ? 0xbfeaff : dusk ? 0xffa0c8 : 0xaee8ff,
       size: 0.08, transparent: true, opacity: 0.5,
       blending: THREE.AdditiveBlending, depthWrite: false, sizeAttenuation: true,
     })
@@ -498,6 +530,7 @@ export function buildArena(world: World, mapKey = 'skyhaven') {
   return {
     sunDir,
     dusk,
+    crystal,
     update(dt: number, t: number) {
       for (const u of updates) u(dt, t)
     },
