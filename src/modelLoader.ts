@@ -1,5 +1,6 @@
 import * as THREE from 'three'
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js'
+import { MeshoptDecoder } from 'three/examples/jsm/libs/meshopt_decoder.module.js'
 import { TEAM_COLOR, type Team } from './types'
 
 /**
@@ -12,6 +13,8 @@ import { TEAM_COLOR, type Team } from './types'
  */
 const cache = new Map<string, THREE.Group | null>()
 const loader = new GLTFLoader()
+// 最適化済みGLB(meshopt圧縮)を読むためにデコーダを登録
+loader.setMeshoptDecoder(MeshoptDecoder)
 
 function normalize(scene: THREE.Object3D, targetHeight: number): THREE.Group {
   const box = new THREE.Box3().setFromObject(scene)
