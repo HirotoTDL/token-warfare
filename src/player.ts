@@ -452,32 +452,71 @@ export class PlayerCommander implements Unit {
       this.sfx.denied()
       return
     }
+    // --- 配備先の決定(寛容な照準): 狙った方向を地面に投影し、必ず置ける点を探す ---
+    const origin = this.camera.position.clone()
     const dir = this.camera.getWorldDirection(new THREE.Vector3())
-    this.deployRay.set(this.camera.position.clone(), dir)
+    const MAXD = 30
+    const target = new THREE.Vector3()
+
+    // 1) まず障害物レイで「平らな低い地面」に当たればそこを使う
+    this.deployRay.set(origin.clone(), dir.clone())
     this.deployRay.near = 0.1
-    this.deployRay.far = 30
+    this.deployRay.far = MAXD
     const hits = this.deployRay.intersectObjects(this.world.obstacleMeshes, false)
-    if (!hits.length) {
-      this.onMessage?.('配備先の地面に照準を合わせる(30m以内)')
-      this.sfx.denied()
-      return
+    const flatHit = hits.find((h) => h.point.y < 1.2 && (!h.face || h.face.normal.y > 0.6))
+    const blockedDist = hits.length ? hits[0].distance : Infinity
+
+    if (flatHit && flatHit.distance <= blockedDist + 0.05) {
+      target.copy(flatHit.point)
+    } else {
+      // 2) 障害物に阻まれた/空を向いている → 視線を地面平面(y=0)へ投影
+      if (dir.y < -0.02) {
+        const t = origin.y / -dir.y // y=0 に達するまでの距離
+        if (t > 1 && t <= MAXD) target.copy(origin).addScaledVector(dir, t)
+      }
+      // 3) それでも決まらなければ足元前方に置く
+      if (target.lengthSq() === 0) {
+        const fwd = this.flatForward()
+        target.copy(this.pos).addScaledVector(fwd, 6)
+      }
+      // 障害物の手前までに制限(壁の向こうには置かない)
+      if (blockedDist < origin.distanceTo(target)) {
+        target.copy(origin).addScaledVector(dir, Math.max(2, blockedDist - 1))
+      }
+      target.y = 0
     }
-    const p = hits[0].point
-    if (p.y > 0.5 || (hits[0].face && hits[0].face.normal.y < 0.6)) {
-      this.onMessage?.('平らな地面にのみ配備可能')
-      this.sfx.denied()
-      return
+    target.y = 0
+
+    // 4) 配備不可セルなら、プレイヤー方向へ少しずつ寄せて空きを探す
+    const lim = this.world.arenaHalf - 1.5
+    target.x = Math.max(-lim, Math.min(lim, target.x))
+    target.z = Math.max(-lim, Math.min(lim, target.z))
+    if (!this.world.nav.isFree(target.x, target.z)) {
+      const toMe = this.pos.clone().sub(target).setY(0).normalize()
+      let found = false
+      for (let step = 1.5; step <= 9; step += 1.5) {
+        const c = target.clone().addScaledVector(toMe, step)
+        if (this.world.nav.isFree(c.x, c.z)) {
+          target.copy(c)
+          found = true
+          break
+        }
+      }
+      if (!found) {
+        this.onMessage?.('近くに配備できる空きがない')
+        this.sfx.denied()
+        return
+      }
     }
-    if (!this.world.nav.isFree(p.x, p.z) || Math.abs(p.x) > this.world.arenaHalf - 1.5 || Math.abs(p.z) > this.world.arenaHalf - 1.5) {
-      this.onMessage?.('そこには配備できない')
-      this.sfx.denied()
-      return
-    }
+
     this.tp -= def.cost
     this.deploysCount++
-    const unit = def.spawn(this.world, this.combat, this.sfx, this.team, new THREE.Vector3(p.x, 0, p.z), dir.clone().setY(0).normalize())
+    const facing = dir.clone().setY(0)
+    if (facing.lengthSq() < 1e-4) facing.copy(this.flatForward())
+    facing.normalize()
+    const unit = def.spawn(this.world, this.combat, this.sfx, this.team, new THREE.Vector3(target.x, 0, target.z), facing)
     this.world.addUnit(unit)
-    this.combat.fx.ring(new THREE.Vector3(p.x, 0, p.z), TEAM_COLOR[this.team])
+    this.combat.fx.ring(new THREE.Vector3(target.x, 0, target.z), TEAM_COLOR[this.team])
     this.sfx.deploy()
     this.onMessage?.(`${def.name} 配備(分裂)`)
   }
