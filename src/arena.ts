@@ -4,6 +4,32 @@ import { TEAM_COLOR, type Team } from './types'
 
 const POP = [0xff4fa3, 0x29d3e8, 0xffd23e, 0x9b5cff, 0x49c46a, 0xff7a2f]
 
+const _texLoader = new THREE.TextureLoader()
+/**
+ * 外部テクスチャ(public/art/<name>.png)を読み込む。
+ * 既存のフォールバック・テクスチャに上書きする形でマテリアルへ適用するため、
+ * マテリアルを渡すとロード完了時に自動で差し替える。無ければフォールバックのまま。
+ */
+function applyExtTexture(
+  mat: THREE.MeshStandardMaterial,
+  name: string,
+  repeat: [number, number] = [1, 1],
+) {
+  _texLoader.load(
+    `art/${name}.png`,
+    (tex) => {
+      tex.wrapS = tex.wrapT = THREE.RepeatWrapping
+      tex.repeat.set(repeat[0], repeat[1])
+      tex.colorSpace = THREE.SRGBColorSpace
+      mat.map = tex
+      mat.color.set(0xffffff)
+      mat.needsUpdate = true
+    },
+    undefined,
+    () => {}, // 無ければフォールバックのまま
+  )
+}
+
 function aabb(cx: number, cz: number, w: number, h: number, d: number, y0 = 0): AABB {
   return {
     min: new THREE.Vector3(cx - w / 2, y0, cz - d / 2),
@@ -123,6 +149,8 @@ export function buildArena(world: World, mapKey = 'skyhaven') {
     roughness: 0.85,
     metalness: 0.1,
   })
+  // AI生成の地面テクスチャがあれば差し替え(無ければプロシージャル)
+  applyExtTexture(groundMat, dusk ? 'tex_ground_dusk' : 'tex_ground', [11, 11])
   const ground = new THREE.Mesh(new THREE.BoxGeometry(half * 2 + 4, 2, half * 2 + 4), groundMat)
   ground.position.y = -1
   ground.receiveShadow = true
@@ -196,10 +224,21 @@ export function buildArena(world: World, mapKey = 'skyhaven') {
     return m
   }
 
+  // コンテナ箱のテクスチャ(AI生成 tex_crate があれば使用、無ければポップ単色)
+  const crateMatBase = new THREE.MeshStandardMaterial({ color: 0x9aa3b2, roughness: 0.55, metalness: 0.35 })
+  applyExtTexture(crateMatBase, 'tex_crate', [1, 1])
   function crate(cx: number, cz: number, size: number) {
-    const color = POP[crateIdx++ % POP.length]
-    const mat = new THREE.MeshStandardMaterial({ color, roughness: 0.6, metalness: 0.15 })
-    solid(new THREE.BoxGeometry(size, size, size), mat, cx, size / 2, cz, aabb(cx, cz, size, size, size))
+    crateIdx++
+    // テクスチャは共有(非同期ロード後に全クレートへ反映)。立体感はエッジトリムで付与
+    const m = solid(new THREE.BoxGeometry(size, size, size), crateMatBase, cx, size / 2, cz, aabb(cx, cz, size, size, size))
+    const trimColor = POP[crateIdx % POP.length]
+    const trim = new THREE.Mesh(
+      new THREE.BoxGeometry(size * 1.02, size * 0.06, size * 1.02),
+      new THREE.MeshStandardMaterial({ color: trimColor, emissive: trimColor, emissiveIntensity: 0.6, roughness: 0.4 }),
+    )
+    trim.position.set(cx, size - size * 0.03, cz)
+    scene.add(trim)
+    return m
   }
 
   function wall(cx: number, cz: number, w: number, d: number, h = 2.4) {

@@ -82,7 +82,24 @@ export abstract class TokenUnit implements Unit {
     for (const m of mats) {
       this.flashPairs.push({ m, color: m.emissive.getHex(), intensity: m.emissiveIntensity })
     }
+    // --- 敵味方の識別: 全トークンに陣営色の発光リング+ベースグローを付与 ---
+    // 形状で能力、色(青=自軍 / 赤=敵軍)で陣営が一目で分かるようにする
+    const tc = TEAM_COLOR[team]
+    const ringMat = new THREE.MeshBasicMaterial({ color: tc, transparent: true, opacity: 0.9, blending: THREE.AdditiveBlending, depthWrite: false })
+    const ring = new THREE.Mesh(new THREE.TorusGeometry(Math.max(0.42, radius + 0.18), 0.05, 8, 28), ringMat)
+    ring.rotation.x = -Math.PI / 2
+    ring.position.y = 0.05
+    this.group.add(ring)
+    const discMat = new THREE.MeshBasicMaterial({ color: tc, transparent: true, opacity: 0.18, blending: THREE.AdditiveBlending, depthWrite: false, side: THREE.DoubleSide })
+    const disc = new THREE.Mesh(new THREE.CircleGeometry(Math.max(0.5, radius + 0.25), 24), discMat)
+    disc.rotation.x = -Math.PI / 2
+    disc.position.y = 0.03
+    this.group.add(disc)
+    this.teamRing = ringMat
   }
+
+  private teamRing: THREE.MeshBasicMaterial | null = null
+  private ringPulse = Math.random() * 6
 
   takeDamage(amount: number, from: Unit | null) {
     if (!this.alive) return
@@ -106,6 +123,11 @@ export abstract class TokenUnit implements Unit {
   }
 
   protected updateFlash(dt: number) {
+    // 陣営リングを脈動させて視認性を上げる
+    if (this.teamRing) {
+      this.ringPulse += dt * 3
+      this.teamRing.opacity = 0.7 + Math.sin(this.ringPulse) * 0.25
+    }
     if (this.flashT > 0) {
       this.flashT -= dt
       if (this.flashT <= 0) {

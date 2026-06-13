@@ -668,6 +668,9 @@ for (const c of CHARACTERS) {
   card.className = `char-card ${c.key} ${c.gender}`
   const colorHex = `#${c.color.toString(16).padStart(6, '0')}`
   card.innerHTML = `
+    <div class="char-portrait" style="--cc: ${colorHex}">
+      <img src="art/portrait_${c.key}.png" alt="${c.name}" loading="lazy" />
+    </div>
     <div class="char-head" style="--cc: ${colorHex}">
       <h3>${c.name}</h3>
       <span class="char-role">${c.role}</span>
