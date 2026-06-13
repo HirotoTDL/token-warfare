@@ -27,8 +27,8 @@ const HEIGHT = 1.7
 function buildWeaponViewmodel(char: CharacterDef): THREE.Group {
   const glb = getScenery('weapon_blaster')
   if (!glb) return buildViewmodel(char)
-  // 元モデルは銃身が左(-X)向き → -Z(前方)へ回転
-  glb.rotation.set(0, -Math.PI / 2, 0)
+  // 元モデルは銃身が+Z(カメラ側)向き → -Z(前方)へ180°回転
+  glb.rotation.set(0, Math.PI, 0)
   const box = new THREE.Box3().setFromObject(glb)
   const size = box.getSize(new THREE.Vector3())
   const s = 0.46 / Math.max(0.001, size.z, size.x)
