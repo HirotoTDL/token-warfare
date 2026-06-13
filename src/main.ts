@@ -17,7 +17,7 @@ import { BotCommander, botParams } from './bot'
 import { HUD } from './hud'
 import { TOKENS } from './tokens'
 import { buildCore, buildMonsterCommander } from './models'
-import { preloadModels, MODEL_MANIFEST } from './modelLoader'
+import { preloadModels, MODEL_MANIFEST, getModel } from './modelLoader'
 import { buildSettingsPanel, settings, onSettingsChange } from './settings'
 import { simulateMatch, simulateMatrix, summarize } from './sim'
 import { DamagePopups } from './dmgpop'
@@ -103,6 +103,7 @@ class MenuView implements View {
   private t = 0
   private showcase = false
   private monsters: THREE.Group[] = []
+  private monsterIsGlb: boolean[] = []
   private focusIdx: number | null = null
   private hopV: number[] = []
 
@@ -111,9 +112,11 @@ class MenuView implements View {
     this.sky = createSky(this.world.scene, this.arena.sunDir)
     this.world.scene.environment = envTex
     ;(this.world.scene as any).environmentIntensity = 0.18
-    // ショーケース: 8人が一列に並ぶ(キャラ選択画面の背景)
+    // ショーケース: 8人が一列に並ぶ(キャラ選択画面の背景)。GLBがあれば使い、無ければプロシージャル
     CHARACTERS.forEach((c, i) => {
-      const m = buildMonsterCommander(c, 'blue')
+      const glb = getModel(`char_${c.key}`, 'blue')
+      const m = glb ?? buildMonsterCommander(c, 'blue')
+      this.monsterIsGlb.push(!!glb)
       m.position.set((i - 3.5) * 2.4, 0, 8)
       m.rotation.y = 0 // +z(カメラ側)を向く
       this.world.scene.add(m)
@@ -132,6 +135,23 @@ class MenuView implements View {
   setShowcase(on: boolean) {
     this.showcase = on
     if (!on) this.focusIdx = null
+    else this.refreshGlbModels()
+  }
+
+  /** 起動時に未ロードだったGLBが揃ったら、プロシージャル表示を差し替える */
+  private refreshGlbModels() {
+    CHARACTERS.forEach((c, i) => {
+      if (this.monsterIsGlb[i]) return
+      const glb = getModel(`char_${c.key}`, 'blue')
+      if (!glb) return
+      const old = this.monsters[i]
+      glb.position.copy(old.position)
+      glb.position.y = 0
+      this.world.scene.remove(old)
+      this.world.scene.add(glb)
+      this.monsters[i] = glb
+      this.monsterIsGlb[i] = true
+    })
   }
 
   focusChar(i: number | null) {
