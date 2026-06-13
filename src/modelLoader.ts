@@ -92,6 +92,16 @@ export function getModel(key: string, team: Team): THREE.Group | null {
   return clone
 }
 
+/**
+ * 装飾用シーナリーのクローンを返す(未配置/読込中なら null)。
+ * チームリングや銃口マーカーは付けない。ステージの背景構造物用。
+ */
+export function getScenery(key: string): THREE.Group | null {
+  const src = cache.get(key)
+  if (!src) return null
+  return src.clone(true)
+}
+
 /** ゲームで使う全モデルキー(プリロード用) */
 export const MODEL_MANIFEST: { key: string; height: number }[] = [
   // キャラ8人(将)
@@ -106,4 +116,7 @@ export const MODEL_MANIFEST: { key: string; height: number }[] = [
   { key: 'token_booster', height: 1.2 }, { key: 'token_chaser', height: 0.7 },
   { key: 'token_bomber', height: 1.0 }, { key: 'token_jammer', height: 1.1 },
   { key: 'token_sniperdrone', height: 0.6 },
+  // ステージ装飾構造物(フェアリィ世界観)
+  { key: 'struct_tower', height: 14 }, { key: 'struct_house', height: 6 },
+  { key: 'struct_arch', height: 8 },
 ]

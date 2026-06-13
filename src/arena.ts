@@ -1,6 +1,7 @@
 import * as THREE from 'three'
 import { World, type AABB } from './world'
 import { TEAM_COLOR, type Team } from './types'
+import { getScenery } from './modelLoader'
 
 const POP = [0xff4fa3, 0x29d3e8, 0xffd23e, 0x9b5cff, 0x49c46a, 0xff7a2f]
 
@@ -526,6 +527,40 @@ export function buildArena(world: World, mapKey = 'skyhaven') {
   updates.push((_dt, t) => {
     for (const f of floaters) f.g.position.y += Math.sin(t * 0.35 + f.phase) * 0.004 * f.amp
   })
+
+  // --- フェアリィ装飾構造物(プレイ範囲外のランドマーク) ---
+  // 28MB→最適化済GLB。配置時に未ロードなら、ロード完了まで毎フレーム再試行する。
+  {
+    const edge = half + 16
+    // [key, x, z, scale, faceCenter]
+    const placements: [string, number, number, number][] = [
+      ['struct_tower', edge, edge, 1.0],
+      ['struct_tower', -edge, -edge, 1.0],
+      ['struct_house', -edge, edge * 0.55, 1.1],
+      ['struct_house', edge, -edge * 0.55, 1.1],
+      ['struct_arch', 0, -edge, 1.2],
+      ['struct_arch', 0, edge, 1.2],
+    ]
+    for (const [key, x, z, sc] of placements) {
+      let placed = false
+      const tryPlace = () => {
+        if (placed) return
+        const g = getScenery(key)
+        if (!g) return
+        placed = true
+        g.position.set(x, -0.1, z)
+        g.scale.multiplyScalar(sc)
+        g.rotation.y = Math.atan2(-x, -z) // 中央を向く
+        g.traverse((o) => {
+          const m = o as THREE.Mesh
+          if (m.isMesh) m.castShadow = m.receiveShadow = true
+        })
+        scene.add(g)
+      }
+      tryPlace()
+      if (!placed) updates.push(() => tryPlace())
+    }
+  }
 
   return {
     sunDir,
