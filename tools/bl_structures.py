@@ -126,7 +126,7 @@ CRYST = solid_mat("crystal", (0.65, 0.93, 0.97), 0.08, 0.0, emit=1.8)
 GATESTONE = tex_mat("gatestone", "tex_carved_fairy_gate.png", 1.3, 0.6)
 OBELISKSTONE = tex_mat("obeliskstone", "tex_rune_obelisk.png", 1.0, 0.45, emit_from_tex=1.4)
 BRONZE = tex_mat("bronze", "tex_ornate_bronze.png", 1.0, 0.35, metal=0.85)
-ROOFTILE = tex_mat("roof", "tex_pastel_tile_wall.png", 2.5, 0.5)
+ROOFTILE = solid_mat("roof", (0.42, 0.74, 0.80), 0.4, 0.15)  # 象徴的なミントブルーのドーム
 
 # 古典柱のプロファイル(台座→ベース繰形→エンタシス軸→ネッキング→エキヌス→アバクス)
 COL_PROFILE = [
