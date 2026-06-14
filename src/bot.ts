@@ -133,7 +133,7 @@ export class BotCommander implements Unit {
     this.hp = this.maxHp = char.hp
     this.group = getModel(`char_${char.key}`, team) ?? buildMonsterCommander(char, team)
     this.group.position.copy(spawn)
-    this.group.rotation.y = Math.atan2(-spawn.x, -spawn.z)
+    this.group.rotation.y = Math.atan2(-spawn.x, -spawn.z) + Math.PI // 中央(敵方向)へ前面を向ける
     this.muzzle = this.group.userData.muzzle as THREE.Object3D
     this.group.traverse((o) => {
       if ((o as THREE.Mesh).isMesh) this.hitMeshes.push(o as THREE.Mesh)
@@ -358,7 +358,8 @@ export class BotCommander implements Unit {
     }
     const dx = t.group.position.x - this.group.position.x
     const dz = t.group.position.z - this.group.position.z
-    this.group.rotation.y = lerpAngle(this.group.rotation.y, Math.atan2(dx, dz), dt * 7)
+    // モデル前面は-Zなので+πで「顔(視線)」をターゲット=実際のエイム方向へ向ける(見かけの視線と一致)
+    this.group.rotation.y = lerpAngle(this.group.rotation.y, Math.atan2(dx, dz) + Math.PI, dt * 9)
 
     const w = this.char.weapon
     this.fireT -= dt
@@ -453,7 +454,8 @@ export class BotCommander implements Unit {
         p.addScaledVector(dir, 4.3 * speedMul * dt)
         this.collide()
         if (!this.target) {
-          this.group.rotation.y = lerpAngle(this.group.rotation.y, Math.atan2(dir.x, dir.z), dt * 8)
+          // 非戦闘時は進行方向へ。モデル前面-Zに合わせ+π
+          this.group.rotation.y = lerpAngle(this.group.rotation.y, Math.atan2(dir.x, dir.z) + Math.PI, dt * 8)
         }
         this.bobWalk(4.3)
       }

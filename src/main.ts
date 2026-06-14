@@ -111,6 +111,9 @@ class MenuView implements View {
   private monsterIsGlb: boolean[] = []
   private focusIdx: number | null = null
   private hopV: number[] = []
+  private pedestals: THREE.Mesh[] = []
+  private fieldFog: THREE.Fog | null = null // 通常時のフォグを退避(ショーケースで濃霧に差し替え)
+  private fieldBg: THREE.Color | THREE.Texture | null = null
 
   constructor() {
     this.arena = buildArena(this.world)
@@ -134,13 +137,29 @@ class MenuView implements View {
       ped.position.set((i - 3.5) * 2.4, 0.07, 8)
       ped.receiveShadow = true
       this.world.scene.add(ped)
+      this.pedestals.push(ped)
     })
   }
 
   setShowcase(on: boolean) {
     this.showcase = on
-    if (!on) this.focusIdx = null
-    else this.refreshGlbModels()
+    const sc = this.world.scene
+    if (on) {
+      this.refreshGlbModels()
+      // フィールドから切り離す: 濃い霧＋クリアな背景でアリーナを覆い隠し、選択キャラだけを浮遊表示
+      if (!this.fieldFog) this.fieldFog = sc.fog as THREE.Fog
+      if (this.fieldBg === null) this.fieldBg = sc.background as THREE.Color | THREE.Texture
+      const bg = new THREE.Color(0x171428)
+      sc.background = bg
+      sc.fog = new THREE.Fog(0x171428, 5, 17)
+      for (const p of this.pedestals) p.visible = false
+    } else {
+      this.focusIdx = null
+      if (this.fieldFog) sc.fog = this.fieldFog
+      if (this.fieldBg !== null) sc.background = this.fieldBg
+      for (const p of this.pedestals) p.visible = true
+      for (const m of this.monsters) m.visible = true
+    }
   }
 
   /** 起動時に未ロードだったGLBが揃ったら、プロシージャル表示を差し替える */
@@ -181,6 +200,8 @@ class MenuView implements View {
     const stageZ = 11
     this.monsters.forEach((m, i) => {
       const focused = this.showcase && this.focusIdx === i
+      // ショーケース(キャラセレクト)は選択キャラのみ表示。タイトル背景では全員表示。
+      m.visible = !this.showcase || focused
       const homeX = (i - 3.5) * 2.4
       // 目標位置: 注目中は中央ステージ(カメラ側へ前進)、それ以外は後列
       const tx = focused ? 0 : homeX
@@ -188,12 +209,18 @@ class MenuView implements View {
       const k = Math.min(1, dt * 6)
       m.position.x += (tx - m.position.x) * k
       m.position.z += (tz - m.position.z) * k
-      // 上下(選択時のホップ＋接地)
-      let baseY = Math.max(0, m.position.y + this.hopV[i] * dt)
-      if (this.hopV[i] !== 0 || baseY > 0) {
-        this.hopV[i] -= 14 * dt
-        if (baseY <= 0) { baseY = 0; this.hopV[i] = 0 }
-        m.position.y = baseY
+      if (focused) {
+        // フィールドから切り離してフローティング表示(緩やかに上下＋傾き)
+        m.position.y += (2.3 - m.position.y) * Math.min(1, dt * 4) + Math.sin(this.t * 1.1) * 0.012
+        this.hopV[i] = 0
+      } else {
+        // 上下(選択時のホップ＋接地)
+        let baseY = Math.max(0, m.position.y + this.hopV[i] * dt)
+        if (this.hopV[i] !== 0 || baseY > 0) {
+          this.hopV[i] -= 14 * dt
+          if (baseY <= 0) { baseY = 0; this.hopV[i] = 0 }
+          m.position.y = baseY
+        }
       }
       // スケール: 注目中は大きく、ショーケースの非選択は控えめに後退
       const ts = focused ? 1.2 : this.showcase ? 0.8 : 1.0
@@ -215,8 +242,9 @@ class MenuView implements View {
       const target = new THREE.Vector3()
       const look = new THREE.Vector3()
       if (this.focusIdx !== null && this.monsters[this.focusIdx]) {
-        target.set(0, 1.5, stageZ + 4.1)
-        look.set(0, 1.0, stageZ)
+        // 浮遊する選択キャラを正面・やや見上げで捉える
+        target.set(0, 2.7, stageZ + 4.0)
+        look.set(0, 2.2, stageZ)
       } else {
         target.set(Math.sin(this.t * 0.12) * 2.5, 3.0, 16.5)
         look.set(0, 1.2, 9)
