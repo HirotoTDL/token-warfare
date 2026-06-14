@@ -492,8 +492,21 @@ class BattleView implements View {
       this.scores.blue = Math.floor(this.objectives.count.blue)
       this.scores.red = Math.floor(this.objectives.count.red)
       if (obj.ticked) {
-        sfx.core()
         this.hud.warn(`占領カウント ${this.scores.blue} - ${this.scores.red}`, 1)
+      }
+      // スフィア確保/被奪取のジュース(低頻度イベントに大演出。研究の3段ジュース予算)
+      for (const fl of obj.flips) {
+        const sphName = fl.id === 'center' ? '中央' : fl.id === 'redBase' ? '敵陣' : '自陣'
+        if (fl.owner === 'blue') {
+          this.hud.killBanner(`${sphName}スフィア 確保!`, true)
+          this.hud.feed(`${sphName}スフィアを確保した`)
+          sfx.core()
+          this.hitstopT = Math.max(this.hitstopT, 0.18)
+        } else {
+          this.hud.warn(`⚠ ${sphName}スフィアを奪われた!`, 2)
+          sfx.damaged()
+          this.hud.damage()
+        }
       }
       if (this.objectives.winner) {
         this.hud.killBanner(this.objectives.winner === 'blue' ? '占領完了 勝利!' : '占領され敗北…', this.objectives.winner === 'blue')

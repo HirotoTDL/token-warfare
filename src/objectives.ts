@@ -28,6 +28,7 @@ export class Sphere {
   private lastOwner: Team | null = null // 占有変化検出用
   private penaltyTeam: Team | null = null // 奪われた側(再奪取の供給-50%)
   private penaltyT = 0
+  justFlipped: Team | null = null // このフレームに占有が反転した(ジュース演出用)
 
   constructor(id: SphereId, pos: THREE.Vector3, initialCharge: number, home: Team | null) {
     this.id = id
@@ -90,9 +91,11 @@ export class Sphere {
     this.hitBlue += dt
     this.hitRed += dt
     this.penaltyT = Math.max(0, this.penaltyT - dt)
-    // 占有が反転したら「奪われた側」に再奪取ペナルティ(3秒・供給半減)
+    this.justFlipped = null
+    // 占有が反転したら「奪われた側」に再奪取ペナルティ(3秒・供給半減)+フリップ演出フラグ
     const own = this.owner()
     if (own && own !== this.lastOwner) {
+      this.justFlipped = own
       if (this.lastOwner) { this.penaltyTeam = this.lastOwner; this.penaltyT = 3 }
       this.lastOwner = own
     } else if (own) {
@@ -145,8 +148,12 @@ export class Objectives {
   }
 
   /** 毎フレーム: カウント加算・勝敗判定。戻り値=この更新でスコアが動いた側(HUD演出用) */
-  update(dt: number): { ticked: Team | null } {
-    for (const s of this.spheres) s.update(dt)
+  update(dt: number): { ticked: Team | null; flips: { id: SphereId; owner: Team }[] } {
+    const flips: { id: SphereId; owner: Team }[] = []
+    for (const s of this.spheres) {
+      s.update(dt)
+      if (s.justFlipped) flips.push({ id: s.id, owner: s.justFlipped })
+    }
     let ticked: Team | null = null
     for (const team of ['blue', 'red'] as Team[]) {
       if (this.dominating(team)) {
@@ -156,6 +163,6 @@ export class Objectives {
         if (this.count[team] >= CAPTURE_TO_WIN && !this.winner) this.winner = team
       }
     }
-    return { ticked }
+    return { ticked, flips }
   }
 }
