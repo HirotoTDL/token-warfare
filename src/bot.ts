@@ -264,19 +264,27 @@ export class BotCommander implements Unit {
         }
       }
     } else if (!pick) {
-      // 武器の得意距離帯のカバーへ寄る(近距離型は詰め、遠距離型は維持)
-      const ideal = this.idealRange()
-      const lo = Math.max(5, ideal - 6)
-      const hi = ideal + 9
-      const cands = cps.filter((p) => {
-        const d = flatDist(p, player.group.position)
-        return d > lo && d < hi
-      })
-      const pool = (cands.length ? cands : cps)
-        .slice()
-        .sort((a, b) => flatDist(a, this.group.position) - flatDist(b, this.group.position))
-        .slice(0, 5)
-      pick = pool[Math.floor(Math.random() * pool.length)] ?? null
+      // ゾーン制圧: 確保すべきスフィアへ向かう(最優先)。スフィアから少し手前で撃てる位置を狙う。
+      const sp = this.priorityCapture()
+      if (sp) {
+        const dir = this.group.position.clone().sub(sp.pos).setY(0)
+        if (dir.lengthSq() < 1) dir.set(0, 0, this.team === 'blue' ? 1 : -1)
+        pick = sp.pos.clone().setY(0).addScaledVector(dir.normalize(), 6)
+      } else {
+        // 支配中など: 武器の得意距離帯のカバーへ寄る
+        const ideal = this.idealRange()
+        const lo = Math.max(5, ideal - 6)
+        const hi = ideal + 9
+        const cands = cps.filter((p) => {
+          const d = flatDist(p, player.group.position)
+          return d > lo && d < hi
+        })
+        const pool = (cands.length ? cands : cps)
+          .slice()
+          .sort((a, b) => flatDist(a, this.group.position) - flatDist(b, this.group.position))
+          .slice(0, 5)
+        pick = pool[Math.floor(Math.random() * pool.length)] ?? null
+      }
     }
     if (pick && (!this.moveTarget || flatDist(pick, this.moveTarget) > 1)) {
       this.moveTarget = pick.clone()
@@ -354,6 +362,7 @@ export class BotCommander implements Unit {
     const t = this.target
     if (!t || !t.alive || t.stealthed || this.charging) {
       this.burstLeft = 0
+      this.captureFire(dt) // 敵が居なければスフィア占領を進める
       return
     }
     const dx = t.group.position.x - this.group.position.x
@@ -410,6 +419,50 @@ export class BotCommander implements Unit {
     }
     this.combat.fx.flash(muzzlePos, 0xffb080, 0.1)
     this.sfx.shotFar(0.13)
+  }
+
+  /** ゾーン制圧: 今このボットが確保すべきスフィア(優先: 中央→敵陣→自陣防衛)。無ければnull(支配中) */
+  private priorityCapture() {
+    const o = this.world.objectives
+    if (!o) return null
+    const me = this.team
+    const enemy = enemyOf(this.team)
+    if (o.center.owner() !== me) return o.center
+    if (o.base[enemy].owner() !== me) return o.base[enemy]
+    if (o.base[me].owner() !== me) return o.base[me] // 自陣を奪われ中→防衛
+    return null
+  }
+
+  /** 敵ターゲットが居ないとき、射程内の優先スフィアを撃って占領を進める */
+  private captureFire(dt: number) {
+    if (this.charging) return
+    const sp = this.priorityCapture()
+    if (!sp) return
+    const px = this.group.position.x
+    const pz = this.group.position.z
+    const d = Math.hypot(sp.pos.x - px, sp.pos.z - pz)
+    if (d > 32) return // 遠ければthink()が接近させる
+    this.group.rotation.y = lerpAngle(this.group.rotation.y, Math.atan2(sp.pos.x - px, sp.pos.z - pz) + Math.PI, dt * 7)
+    const w = this.char.weapon
+    this.fireT -= dt
+    if (this.fireT <= 0 && this.energy >= w.energyCost) {
+      this.fireT = 1 / Math.max(1.2, w.rate)
+      this.energy -= w.energyCost
+      if (this.stealthed) this.setStealth(false)
+      const origin = this.eye()
+      const dir = sp.pos.clone().sub(origin).normalize()
+      const muzzlePos = this.muzzle.getWorldPosition(new THREE.Vector3())
+      for (let i = 0; i < w.pellets; i++) {
+        const sd = this.combat.spreadDir(dir, w.spread * 0.4)
+        this.combat.fireBolt(muzzlePos.clone(), sd, {
+          damage: w.damage * this.params.dmgMul, team: this.team, from: this, speed: w.boltSpeed,
+          falloff: w.falloff, color: 0xff8a78, explosive: w.explosive, gravity: w.gravity, maxRange: 110,
+          size: w.explosive ? 0.16 : 0.085,
+        })
+      }
+      this.combat.fx.flash(muzzlePos, 0xffb080, 0.1)
+      this.sfx.shotFar(0.1)
+    }
   }
 
   private moveUpdate(dt: number) {
