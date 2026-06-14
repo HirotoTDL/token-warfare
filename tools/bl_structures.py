@@ -8,7 +8,7 @@ bpy.ops.wm.read_factory_settings(use_empty=True)
 OBJS = []
 
 
-def tex_mat(name, tex, scale=2.0, rough=0.6, metal=0.0, emit=None, ecol=(1, 1, 1)):
+def tex_mat(name, tex, scale=2.0, rough=0.6, metal=0.0, emit=None, ecol=(1, 1, 1), emit_from_tex=0.0):
     m = bpy.data.materials.new(name); m.use_nodes = True; nt = m.node_tree
     bsdf = nt.nodes["Principled BSDF"]
     bsdf.inputs["Roughness"].default_value = rough
@@ -21,6 +21,10 @@ def tex_mat(name, tex, scale=2.0, rough=0.6, metal=0.0, emit=None, ecol=(1, 1, 1
         nt.links.new(tc.outputs["Generated"], mp.inputs["Vector"])
         nt.links.new(mp.outputs["Vector"], ti.inputs["Vector"])
         nt.links.new(ti.outputs["Color"], bsdf.inputs["Base Color"])
+        if emit_from_tex > 0:
+            # テクスチャの明部(発光ルーン等)をそのまま自発光させる
+            nt.links.new(ti.outputs["Color"], bsdf.inputs["Emission Color"])
+            bsdf.inputs["Emission Strength"].default_value = emit_from_tex
     if emit is not None:
         bsdf.inputs["Emission Color"].default_value = (*ecol, 1)
         bsdf.inputs["Emission Strength"].default_value = emit
@@ -70,12 +74,17 @@ JEWEL = tex_mat("jewel", "tex_jewel_inlay_panel.png", 1.2, 0.3, metal=0.3)
 RUNE = tex_mat("rune", "tex_glowing_rune_floor.png", 2.0, 0.4, emit=0.6, ecol=(0.5, 0.9, 1.0))
 GOLD = solid_mat("gold", (0.95, 0.78, 0.38), 0.25, 1.0)
 CRYST = solid_mat("crystal", (0.6, 0.92, 0.95), 0.1, 0.0, emit=1.6)
+# GPT発注の専用テクスチャ(商業レベル化)
+COLUMN = tex_mat("column", "tex_fluted_marble_column.png", 3.0, 0.3)
+GATESTONE = tex_mat("gatestone", "tex_carved_fairy_gate.png", 1.4, 0.6)
+OBELISKSTONE = tex_mat("obeliskstone", "tex_rune_obelisk.png", 1.0, 0.45, emit_from_tex=1.4)
+BRONZE = tex_mat("bronze", "tex_ornate_bronze.png", 1.0, 0.35, metal=0.85)
 
 
 def build_pillar():
     add('primitive_cylinder_add', MOLD, vertices=8, radius=0.95, depth=0.35, location=(0, 0, 0.175))
     add('primitive_cylinder_add', MARBLE, vertices=8, radius=0.78, depth=0.22, location=(0, 0, 0.46))
-    add('primitive_cone_add', MARBLE, vertices=24, radius1=0.62, radius2=0.5, depth=4.4, location=(0, 0, 2.77))
+    add('primitive_cone_add', COLUMN, vertices=24, radius1=0.62, radius2=0.5, depth=4.4, location=(0, 0, 2.77))
     for z in (0.62, 4.92):
         add('primitive_torus_add', GOLD, major_radius=0.6, minor_radius=0.06, location=(0, 0, z), major_segments=24, minor_segments=8)
     add('primitive_cone_add', MOLD, vertices=24, radius1=0.52, radius2=0.92, depth=0.55, location=(0, 0, 5.25))
@@ -96,10 +105,10 @@ def build_canopy():
 
 def build_gate():
     for sx in (-1, 1):
-        add('primitive_cylinder_add', STONE, vertices=8, radius=0.7, depth=5.2, location=(sx * 3.0, 0, 2.6))
+        add('primitive_cylinder_add', GATESTONE, vertices=8, radius=0.7, depth=5.2, location=(sx * 3.0, 0, 2.6))
         add('primitive_cylinder_add', MOLD, vertices=8, radius=0.82, depth=0.4, location=(sx * 3.0, 0, 0.2))
         add('primitive_cylinder_add', MOLD, vertices=8, radius=0.8, depth=0.4, location=(sx * 3.0, 0, 5.0))
-    arch = add('primitive_torus_add', STONE, major_radius=3.0, minor_radius=0.55, location=(0, 0, 5.2), major_segments=32, minor_segments=12)
+    arch = add('primitive_torus_add', GATESTONE, major_radius=3.0, minor_radius=0.55, location=(0, 0, 5.2), major_segments=32, minor_segments=12)
     arch.rotation_euler = (math.radians(90), 0, 0)
     cut_below(arch, 5.2)
     add('primitive_cube_add', MOLD, size=1.0, location=(0, 0, 7.9)); OBJS[-1].scale = (0.55, 0.7, 0.7)
@@ -134,9 +143,9 @@ def build_island():
 
 def build_brazier():
     # かがり火: 台座 + 脚付きボウル + 発光コア + 炎(エミッシブコーン)
-    FLAME = solid_mat("flame", (1.0, 0.62, 0.28), 0.4, 0.0, emit=4.0)
-    add('primitive_cylinder_add', STONE, vertices=12, radius=0.6, depth=0.35, location=(0, 0, 0.175))
-    add('primitive_cone_add', MOLD, vertices=12, radius1=0.22, radius2=0.55, depth=1.3, location=(0, 0, 0.95))
+    FLAME = solid_mat("flame", (1.0, 0.5, 0.18), 0.4, 0.0, emit=9.0)
+    add('primitive_cylinder_add', BRONZE, vertices=12, radius=0.6, depth=0.35, location=(0, 0, 0.175))
+    add('primitive_cone_add', BRONZE, vertices=12, radius1=0.22, radius2=0.55, depth=1.3, location=(0, 0, 0.95))
     add('primitive_torus_add', GOLD, major_radius=0.62, minor_radius=0.09, location=(0, 0, 1.6), major_segments=20, minor_segments=8)
     add('primitive_cylinder_add', FLAME, vertices=16, radius=0.55, depth=0.12, location=(0, 0, 1.58))
     add('primitive_cone_add', FLAME, vertices=12, radius1=0.42, radius2=0, depth=1.1, location=(0, 0, 2.1))
@@ -147,7 +156,7 @@ def build_obelisk():
     # ルーン・オベリスク: 段台座 + 4面テーパー柱(ルーン発光) + 金キャップ + 頂部クリスタル
     add('primitive_cylinder_add', MOLD, vertices=4, radius=1.1, depth=0.4, location=(0, 0, 0.2), rotation=(0, 0, math.radians(45)))
     add('primitive_cylinder_add', STONE, vertices=4, radius=0.85, depth=0.3, location=(0, 0, 0.5), rotation=(0, 0, math.radians(45)))
-    add('primitive_cone_add', RUNE, vertices=4, radius1=0.62, radius2=0.28, depth=5.4, location=(0, 0, 3.35), rotation=(0, 0, math.radians(45)))
+    add('primitive_cone_add', OBELISKSTONE, vertices=4, radius1=0.62, radius2=0.28, depth=5.4, location=(0, 0, 3.35), rotation=(0, 0, math.radians(45)))
     add('primitive_cone_add', GOLD, vertices=4, radius1=0.34, radius2=0, depth=0.7, location=(0, 0, 6.4), rotation=(0, 0, math.radians(45)))
     add('primitive_ico_sphere_add', CRYST, radius=0.26, location=(0, 0, 6.5), subdivisions=2)
 
