@@ -357,8 +357,23 @@ def build_fairytower():
                 add('primitive_ico_sphere_add', FLW, smooth=True, radius=0.06, location=((rr + 0.05) * math.cos(ang), (rr + 0.05) * math.sin(ang), z), subdivisions=1)
 
 
+def build_hill():
+    # 遠景の丸い丘(回転体の緑の盛り上がり + 岩の露出 + 頂の小クリスタル群)。フォグに溶ける背景用。
+    GRASS = tex_mat("grass", "tex_grass_flower_meadow.png", 1.6, 0.9)
+    ROCK = tex_mat("rock", "tex_mossy_stone_ground.png", 1.4, 0.85)
+    revolve([(0, 0.78), (0.45, 0.74), (0.85, 0.6), (1.2, 0.36), (1.5, 0.14), (1.62, 0.03), (1.7, 0)], GRASS, 40, "hill", 1)
+    # 岩の露出(片側に寄せて自然に)
+    for (rx, ry, rz, rs) in [(0.5, 0.3, 0.42, 0.32), (-0.4, 0.55, 0.3, 0.26), (0.2, -0.5, 0.36, 0.22)]:
+        add('primitive_ico_sphere_add', ROCK, smooth=True, radius=rs, location=(rx, ry, rz), subdivisions=2)
+    # 頂のクリスタル(小)
+    for k in range(3):
+        ang = k / 3 * math.tau
+        add('primitive_cone_add', CRYST, smooth=False, vertices=6, radius1=0.1, radius2=0, depth=0.4, location=(0.18 * math.cos(ang), 0.18 * math.sin(ang), 0.8))
+
+
 BUILDERS = {'pillar': build_pillar, 'gate': build_gate, 'obelisk': build_obelisk, 'brazier': build_brazier,
-            'canopy': build_canopy, 'railing': build_railing, 'island': build_island, 'fairytower': build_fairytower}
+            'canopy': build_canopy, 'railing': build_railing, 'island': build_island,
+            'fairytower': build_fairytower, 'hill': build_hill}
 BUILDERS[kind]()
 
 bpy.ops.object.select_all(action='DESELECT')

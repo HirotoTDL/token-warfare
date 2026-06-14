@@ -207,6 +207,8 @@ export const MODEL_MANIFEST: { key: string; height: number }[] = [
   { key: 'struct_railing', height: 1.2 }, { key: 'struct_island', height: 7 },
   { key: 'struct_brazier', height: 2.4 }, { key: 'struct_obelisk', height: 7 },
   { key: 'struct_fairytower', height: 12 },
+  // 遠景の自作の丘(フォグ背景)
+  { key: 'struct_hill', height: 1 },
   // フェアリィ3Dプロップ(手続きプロップの格上げ)
   { key: 'prop_fountain', height: 2.6 }, { key: 'prop_chest', height: 1.0 },
   { key: 'prop_mushroom', height: 2.2 }, { key: 'prop_lamp', height: 3.4 },

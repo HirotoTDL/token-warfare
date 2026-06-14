@@ -792,11 +792,13 @@ export function buildArena(world: World, mapKey = 'skyhaven') {
   const foliMat = new THREE.MeshStandardMaterial({ color: crystal ? 0xaadbe6 : dusk ? 0x4f7060 : 0x74bd92, roughness: 0.95 })
   const floaters: { g: THREE.Group; phase: number; amp: number }[] = []
 
-  // 大型浮遊島のリング(空に世界が続く印象。様々な高さ・大きさ)
+  // 大型浮遊島のリング(空に世界が続く印象)。手続きで即表示し、自作の浮遊島GLB(struct_island)が
+  // 揃い次第その大型クローンへ差し替える(草地+岩+クリスタルの作り込み)。
   for (let i = 0; i < 14; i++) {
     const a = (i / 14) * Math.PI * 2 + 0.3
     const r = 155 + (i % 4) * 72 + ((i * 23) % 55)
     const s = 14 + ((i * 11) % 28)
+    const py = 8 + ((i * 17) % 78) - 34
     const g = new THREE.Group()
     const base = new THREE.Mesh(new THREE.CylinderGeometry(s * 0.9, s * 0.18, s * 0.8, 7), landMat)
     const top = new THREE.Mesh(new THREE.CylinderGeometry(s, s * 0.92, s * 0.28, 7), foliMat)
@@ -804,10 +806,28 @@ export function buildArena(world: World, mapKey = 'skyhaven') {
     const tip = new THREE.Mesh(new THREE.ConeGeometry(s * 0.34, s * 0.9, 6), foliMat)
     tip.position.y = s * 1.0
     g.add(base, top, tip)
-    g.position.set(Math.cos(a) * r, 8 + ((i * 17) % 78) - 34, Math.sin(a) * r)
+    g.position.set(Math.cos(a) * r, py, Math.sin(a) * r)
     g.rotation.y = a * 2
     scene.add(g)
-    floaters.push({ g, phase: i * 1.5, amp: 0.8 + (i % 3) * 0.6 })
+    const rec = { g, phase: i * 1.5, amp: 0.8 + (i % 3) * 0.6 }
+    floaters.push(rec)
+    let swapped = false
+    const trySwap = () => {
+      if (swapped) return
+      const isl = getScenery('struct_island')
+      if (!isl) return
+      swapped = true
+      const bb = new THREE.Box3().setFromObject(isl)
+      const hNow = bb.max.y - bb.min.y
+      isl.scale.setScalar((s * 1.5) / Math.max(0.3, hNow))
+      isl.position.set(Math.cos(a) * r, py, Math.sin(a) * r)
+      isl.rotation.y = a * 1.7
+      scene.add(isl)
+      scene.remove(g)
+      rec.g = isl
+    }
+    trySwap()
+    if (!swapped) updates.push(trySwap)
   }
 
   // 巨大樹(プレイ外周。Tripo製の3D大樹で森の縁を表現。未ロード時は遅延配置)
@@ -834,7 +854,7 @@ export function buildArena(world: World, mapKey = 'skyhaven') {
     if (!done) updates.push(() => tryTree())
   }
 
-  // 遠方の山/丘の影(地平を埋め、世界の果てを霞ませる)
+  // 遠方の丘(地平を埋め、世界の果てを霞ませる)。自作の丸い丘GLB(struct_hill)が揃えば差し替え。
   for (let i = 0; i < 18; i++) {
     const a = (i / 18) * Math.PI * 2 + 0.15
     const r = 370 + ((i * 29) % 170)
@@ -843,6 +863,22 @@ export function buildArena(world: World, mapKey = 'skyhaven') {
     hill.position.set(Math.cos(a) * r, -10, Math.sin(a) * r)
     hill.rotation.y = i
     scene.add(hill)
+    let hdone = false
+    const tryHill = () => {
+      if (hdone) return
+      const g = getScenery('struct_hill')
+      if (!g) return
+      hdone = true
+      const bb = new THREE.Box3().setFromObject(g)
+      const hNow = bb.max.y - bb.min.y
+      g.scale.setScalar((s * 0.8) / Math.max(0.3, hNow))
+      g.position.set(Math.cos(a) * r, -10, Math.sin(a) * r)
+      g.rotation.y = i
+      scene.add(g)
+      scene.remove(hill)
+    }
+    tryHill()
+    if (!hdone) updates.push(tryHill)
   }
 
   updates.push((_dt, t) => {
