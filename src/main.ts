@@ -70,7 +70,11 @@ function showScreen(name: keyof typeof screens | null) {
     el.classList.toggle('hidden', k !== name)
   }
   // キャラ選択中はメニュー背景をショーケースカメラに
-  if (view instanceof MenuView) view.setShowcase(name === 'select')
+  if (view instanceof MenuView) {
+    view.setShowcase(name === 'select')
+    // 選択画面に入ったら現在の選択キャラを中央ステージへフォーカス(連動が切れて中央に出ない不具合の修正)
+    if (name === 'select') view.focusChar(selectedIdx)
+  }
 }
 
 function disposeScene(scene: THREE.Scene) {
