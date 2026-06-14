@@ -134,6 +134,17 @@ export class World {
   cores: Core[] = []
   coreSpots: THREE.Vector3[] = []
 
+  /** スフィア占領モードの目標(BattleView/simが生成して差し込む) */
+  objectives: import('./objectives').Objectives | null = null
+
+  /** pos近傍のスフィアに team の占領ダメージを与える。命中したらtrue(弾/爆発から呼ぶ) */
+  damageSphereAt(pos: THREE.Vector3, team: Team, amount: number, extra = 0): boolean {
+    const s = this.objectives?.sphereNear(pos, extra)
+    if (!s) return false
+    s.damage(team, amount)
+    return true
+  }
+
   /** 敵将リビール(チーム→残り秒。>0ならそのチームの将がマップに映る) */
   revealT: Record<Team, number> = { blue: 0, red: 0 }
   onReveal: ((team: Team, sec: number) => void) | null = null

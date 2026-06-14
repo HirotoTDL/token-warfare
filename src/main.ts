@@ -20,6 +20,7 @@ import { buildCore, buildMonsterCommander } from './models'
 import { preloadModels, MODEL_MANIFEST, getModel, animateSkeleton, animateGlbBody } from './modelLoader'
 import { buildSettingsPanel, settings, onSettingsChange } from './settings'
 import { simulateMatch, simulateMatrix, summarize } from './sim'
+import { Objectives, CAPTURE_TO_WIN } from './objectives'
 import { DamagePopups } from './dmgpop'
 import { PostFX } from './postfx'
 import { RoomEnvironment } from 'three/examples/jsm/environments/RoomEnvironment.js'
@@ -260,7 +261,8 @@ class BattleView implements View {
   over = false
   everLocked = false
   timer = MATCH_TIME
-  scores: Record<Team, number> = { blue: 0, red: 0 }
+  objectives!: Objectives
+  scores: Record<Team, number> = { blue: 0, red: 0 } // スフィア占領カウント(整数表示)
   private respawnT: Partial<Record<Team, number>> = {}
   private fx: Effects
   private combat: Combat
@@ -288,6 +290,9 @@ class BattleView implements View {
     this.combat = new Combat(this.world, this.fx, sfx)
     this.popups = new DamagePopups(this.world.scene)
     this.world.scene.add(this.camera)
+    // スフィア占領目標: 中央＋両陣に配置(charge式で奪い合う)
+    this.objectives = new Objectives(this.world.scene, new THREE.Vector3(0, 3, 0), this.world.basePos)
+    this.world.objectives = this.objectives
 
     const char = characterByKey(config.charKey)
     const others = CHARACTERS.filter((c) => c.key !== config.charKey)
@@ -322,18 +327,11 @@ class BattleView implements View {
 
     this.world.onKill = (victim, killer) => {
       if (victim.isCommander) {
-        const scorer = victim.team === 'red' ? 'blue' : 'red'
-        this.scores[scorer]++
+        // 占領モード: 撃破はスコアではなく「盤面の主導権」を取る手段。倒して占領を妨げる/通す。
         sfx.kill()
         this.hitstopT = 0.4 // ヒットストップ(一瞬のスロー演出)
-        this.hud.killBanner(victim.team === 'red' ? '敵将撃破!!' : 'やられた…', victim.team === 'red')
-        this.hud.feed(victim.team === 'red' ? `敵将${victim.name}を撃破!` : `${victim.name}、討たれる…`)
-        this.hud.warn(`${this.scores.blue} - ${this.scores.red}`, 2)
-        if (this.suddenDeath) {
-          // サドンデス: 次の撃破で即決着
-          this.finish()
-          return
-        }
+        this.hud.killBanner(victim.team === 'red' ? '敵将を撃破!' : 'やられた…', victim.team === 'red')
+        this.hud.feed(victim.team === 'red' ? `敵将${victim.name}を撃破! 占領のチャンス` : `${victim.name}、討たれる…`)
         const rt = this.timer <= OVERTIME_AT ? RESPAWN_TIME_OT : RESPAWN_TIME
         this.respawnT[victim.team] = rt
         return
@@ -351,7 +349,7 @@ class BattleView implements View {
       }
     }
 
-    this.hud.message('3分間 — 敵将を多く撃破した方が勝ち!', 3)
+    this.hud.message(`中央＋敵スフィアを確保してカウントを稼げ! 先に${CAPTURE_TO_WIN}で勝利`, 3)
 
     // 最初の3試合だけチュートリアルTIPを出す
     try {
@@ -460,13 +458,26 @@ class BattleView implements View {
     if (paused) return
 
     if (!this.over) {
+      // スフィア占領カウント更新(中央＋敵陣を確保している側が加算)
+      const obj = this.objectives.update(dt)
+      this.scores.blue = Math.floor(this.objectives.count.blue)
+      this.scores.red = Math.floor(this.objectives.count.red)
+      if (obj.ticked) {
+        sfx.core()
+        this.hud.warn(`占領カウント ${this.scores.blue} - ${this.scores.red}`, 1)
+      }
+      if (this.objectives.winner) {
+        this.hud.killBanner(this.objectives.winner === 'blue' ? '占領完了 勝利!' : '占領され敗北…', this.objectives.winner === 'blue')
+        this.finish()
+      }
+
       this.timer -= dt
       if (this.timer <= 0) {
         if (!this.suddenDeath && this.scores.blue === this.scores.red) {
-          // 同点ならサドンデス(45秒・次の撃破で決着。決着しなければDRAW)
+          // 同点ならサドンデス(45秒・先にリードした側が勝ち)
           this.suddenDeath = true
           this.timer = 45
-          this.hud.warn('🔥 SUDDEN DEATH — 次の撃破で決着!', 4)
+          this.hud.warn('🔥 サドンデス — 先にカウントを進めた方が勝ち!', 4)
           sfx.overtime()
           bgm.play('overtime')
         } else {
@@ -474,6 +485,8 @@ class BattleView implements View {
           this.finish()
         }
       }
+      // サドンデス中: どちらかが少しでもリードしたら即決着
+      if (this.suddenDeath && this.scores.blue !== this.scores.red) this.finish()
       // オーバータイム告知
       if (!this.overtimeAnnounced && this.timer <= OVERTIME_AT) {
         this.overtimeAnnounced = true

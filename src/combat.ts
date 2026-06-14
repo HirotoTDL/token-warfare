@@ -258,6 +258,20 @@ export class Combat {
         continue
       }
 
+      // スフィア占領: 弾がスフィアに入ったら占領ダメージを与えて消滅(爆発弾は爆発で処理)
+      const sphere = this.world.objectives?.sphereNear(b.pos, 0.4)
+      if (sphere) {
+        const dmg = b.opts.damage * (b.opts.falloff ? falloffMul(b.opts.falloff, b.traveled) : 1)
+        if (b.opts.explosive) {
+          this.explode(b.pos.clone(), b.opts.explosive.radius, dmg, b.opts.team, b.opts.from)
+        } else {
+          sphere.damage(b.opts.team, dmg)
+          this.fx.spark(b.pos.clone(), b.opts.color ?? 0xff9060)
+        }
+        this.killBolt(i)
+        continue
+      }
+
       b.pos.addScaledVector(dir, step)
       b.traveled += step
       b.mesh.position.copy(b.pos)
@@ -281,6 +295,9 @@ export class Combat {
   explode(pos: THREE.Vector3, radius: number, damage: number, team: Team, from: Unit | null, color = 0xff8830) {
     this.fx.explosion(pos, radius, color)
     this.sfx.explosion()
+    // 範囲内のスフィアにも占領ダメージ(爆発は占領を一気に進める)
+    const sphere = this.world.objectives?.sphereNear(pos, radius)
+    if (sphere) sphere.damage(team, damage)
     for (const u of [...this.world.units]) {
       if (!u.alive || u.team === team) continue
       const center = u.group.position.clone()
