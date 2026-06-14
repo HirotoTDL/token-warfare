@@ -601,6 +601,10 @@ class BattleView implements View {
             count: this.world.countActive('blue', k),
             affordable: this.player.tp >= TOKENS[k].cost,
           })),
+          spheres: this.objectives.spheres.map((sp) => ({
+            id: sp.id, owner: sp.owner(), contested: Math.abs(sp.charge) > 0.05 && sp.owner() === null,
+          })),
+          countGoal: CAPTURE_TO_WIN,
         },
         dt,
       )

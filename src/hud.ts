@@ -20,6 +20,9 @@ export interface HudState {
   suddenDeath: boolean
   deadCountdown: number | null
   slots: { def: TokenDef; count: number; affordable: boolean }[]
+  /** スフィア占有状態(占領モード): 青陣/中央/敵陣の所有 */
+  spheres?: { id: string; owner: 'blue' | 'red' | null; contested: boolean }[]
+  countGoal?: number
 }
 
 export class HUD {
@@ -43,6 +46,13 @@ export class HUD {
             <span class="ot-label" id="h-ot">OVERTIME</span>
           </div>
           <span class="score red" id="h-score-red">0</span>
+        </div>
+        <div class="sphere-status" id="h-spheres" style="display:flex;gap:14px;justify-content:center;align-items:center;margin-top:4px;">
+          <span class="sph-label" style="font-size:11px;opacity:0.8;color:#fff;">占領</span>
+          <span id="h-sph-blueBase" title="青陣スフィア" style="width:14px;height:14px;border-radius:50%;border:1.5px solid rgba(255,255,255,0.5);background:#3da8ff;"></span>
+          <span id="h-sph-center" title="中央スフィア" style="width:18px;height:18px;border-radius:50%;border:1.5px solid rgba(255,255,255,0.7);background:#cccccc;"></span>
+          <span id="h-sph-redBase" title="赤陣スフィア" style="width:14px;height:14px;border-radius:50%;border:1.5px solid rgba(255,255,255,0.5);background:#ff5040;"></span>
+          <span class="sph-goal" style="font-size:11px;opacity:0.8;color:#ffd23e;">/30で勝利</span>
         </div>
       </div>
       <div id="h-warn"></div>
@@ -86,6 +96,7 @@ export class HUD {
       <div id="h-minimap-slot"></div>
     `
     const ids = ['h-score-blue', 'h-score-red', 'h-timer', 'h-ot', 'h-warn', 'h-hp', 'h-hp-fill',
+      'h-sph-blueBase', 'h-sph-center', 'h-sph-redBase',
       'h-en-fill', 'h-en-state', 'h-skill', 'h-skill-cd', 'h-momentum',
       'h-tp-fill', 'h-tp', 'h-slots', 'h-feed', 'h-msg', 'h-crosshair', 'h-hitmarker',
       'h-vignette', 'h-stealth', 'h-dead', 'h-dead-count', 'h-minimap-slot', 'h-killbanner', 'h-tip']
@@ -110,6 +121,15 @@ export class HUD {
   update(s: HudState, dt: number) {
     this.els['h-score-blue'].textContent = `${s.scoreBlue}`
     this.els['h-score-red'].textContent = `${s.scoreRed}`
+    // スフィア占有状態(色: 青/赤/無色グレー。係争中はパルス)
+    if (s.spheres) {
+      for (const sp of s.spheres) {
+        const el = this.els[`h-sph-${sp.id}`]
+        if (!el) continue
+        el.style.background = sp.owner === 'blue' ? '#3da8ff' : sp.owner === 'red' ? '#ff5040' : '#bbbbbb'
+        el.style.boxShadow = sp.contested ? '0 0 8px 2px #ffd23e' : 'none'
+      }
+    }
     const t = Math.max(0, s.timer)
     const timerText = `${Math.floor(t / 60)}:${String(Math.floor(t % 60)).padStart(2, '0')}`
     if (timerText !== this.lastTimerText) {
