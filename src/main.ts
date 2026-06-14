@@ -17,7 +17,7 @@ import { BotCommander, botParams } from './bot'
 import { HUD } from './hud'
 import { TOKENS } from './tokens'
 import { buildCore, buildMonsterCommander } from './models'
-import { preloadModels, MODEL_MANIFEST, getModel, animateSkeleton } from './modelLoader'
+import { preloadModels, MODEL_MANIFEST, getModel, animateSkeleton, animateGlbBody } from './modelLoader'
 import { buildSettingsPanel, settings, onSettingsChange } from './settings'
 import { simulateMatch, simulateMatrix, summarize } from './sim'
 import { DamagePopups } from './dmgpop'
@@ -172,35 +172,47 @@ class MenuView implements View {
     // (タイトル/ホーム画面でも反映されるよう、全員GLBになるまで毎フレーム試行)
     if (this.monsterIsGlb.some((b) => !b)) this.refreshGlbModels()
 
-    // モンスターのアイドル挙動
+    // キャラのステージ挙動: 選択中は中央ステージへせり出して大きく見せる(盛り上げ演出)
+    const stageZ = 11
     this.monsters.forEach((m, i) => {
+      const focused = this.showcase && this.focusIdx === i
+      const homeX = (i - 3.5) * 2.4
+      // 目標位置: 注目中は中央ステージ(カメラ側へ前進)、それ以外は後列
+      const tx = focused ? 0 : homeX
+      const tz = focused ? stageZ : 8
+      const k = Math.min(1, dt * 6)
+      m.position.x += (tx - m.position.x) * k
+      m.position.z += (tz - m.position.z) * k
+      // 上下(選択時のホップ＋接地)
       let baseY = Math.max(0, m.position.y + this.hopV[i] * dt)
       if (this.hopV[i] !== 0 || baseY > 0) {
         this.hopV[i] -= 14 * dt
-        if (baseY <= 0) {
-          baseY = 0
-          this.hopV[i] = 0
-        }
+        if (baseY <= 0) { baseY = 0; this.hopV[i] = 0 }
         m.position.y = baseY
       }
-      const sway = Math.sin(this.t * 1.6 + i * 1.3) * 0.06
-      m.rotation.y = (this.focusIdx === i ? Math.sin(this.t * 2.5) * 0.25 : sway)
-      m.rotation.z = Math.sin(this.t * 2 + i) * 0.015
-      // リグ済みキャラは関節アイドル(注目中は少し大きく動かす)
-      if (m.userData.bones) animateSkeleton(m, this.t * 2.2 + i, this.focusIdx === i ? 0.35 : 0.14)
+      // スケール: 注目中は大きく、ショーケースの非選択は控えめに後退
+      const ts = focused ? 1.2 : this.showcase ? 0.8 : 1.0
+      const s = m.scale.x + (ts - m.scale.x) * k
+      m.scale.setScalar(s)
+      // 向き: 注目中はゆったり見回し(正面寄り)、それ以外は控えめスウェイ
+      m.rotation.y = focused ? Math.sin(this.t * 0.7) * 0.4 : Math.sin(this.t * 1.6 + i * 1.3) * 0.06
+      m.rotation.z = focused ? 0 : Math.sin(this.t * 2 + i) * 0.015
+      // モーション: リグ済みは関節アニメ、無リグは体アニメ。注目中は活発に動かす
+      const amp = focused ? 0.55 : this.showcase ? 0.1 : 0.14
+      if (m.userData.bones) animateSkeleton(m, this.t * 2.2 + i, amp)
+      else animateGlbBody(m, this.t * 2.0 + i, amp)
     })
 
     if (this.showcase) {
-      // ショーケースカメラ(フォーカス中はそのキャラに寄る)
+      // ショーケースカメラ: 中央ステージのキャラを正面・大きめに捉える
       const target = new THREE.Vector3()
       const look = new THREE.Vector3()
       if (this.focusIdx !== null && this.monsters[this.focusIdx]) {
-        const mp = this.monsters[this.focusIdx].position
-        target.set(mp.x, 1.7, mp.z + 3.4)
-        look.set(mp.x, 1.2, mp.z)
+        target.set(0, 1.75, stageZ + 3.2)
+        look.set(0, 1.2, stageZ)
       } else {
         target.set(Math.sin(this.t * 0.12) * 2.5, 3.0, 16.5)
-        look.set(0, 1.2, 8)
+        look.set(0, 1.2, 9)
       }
       this.camera.position.lerp(target, Math.min(1, dt * 3.5))
       this.camera.lookAt(look)
@@ -670,7 +682,6 @@ for (let lv = 1; lv <= 10; lv++) {
 // キャラ選択(ロスター＋大プレビュー＋詳細パネル＋出撃)
 const rosterRoot = document.getElementById('char-roster')!
 const previewWrap = document.getElementById('char-preview')!
-const previewImg = document.getElementById('preview-img') as HTMLImageElement
 const previewName = document.getElementById('preview-name')!
 const previewRole = document.getElementById('preview-role')!
 const previewTitle = document.getElementById('preview-title')!
@@ -683,12 +694,11 @@ function selectCharacter(c: CharacterDef, idx: number) {
   selectedChar = c
   selectedIdx = idx
   const colorHex = `#${c.color.toString(16).padStart(6, '0')}`
-  // 大プレビュー(立ち絵差し替え。再生アニメで切替感)
+  // 名前タグ(3Dモデルは中央ステージで見せる)
   previewWrap.style.setProperty('--cc', colorHex)
-  previewImg.classList.remove('swap')
-  void previewImg.offsetWidth
-  previewImg.src = `art/portrait_${c.key}.png`
-  previewImg.classList.add('swap')
+  previewWrap.classList.remove('swap')
+  void previewWrap.offsetWidth
+  previewWrap.classList.add('swap')
   previewName.textContent = c.name
   previewRole.textContent = c.role
   previewTitle.textContent = c.title
