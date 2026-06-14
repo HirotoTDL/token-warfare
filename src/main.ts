@@ -17,7 +17,7 @@ import { BotCommander, botParams } from './bot'
 import { HUD } from './hud'
 import { TOKENS } from './tokens'
 import { buildCore, buildMonsterCommander } from './models'
-import { preloadModels, MODEL_MANIFEST, getModel } from './modelLoader'
+import { preloadModels, MODEL_MANIFEST, getModel, animateSkeleton } from './modelLoader'
 import { buildSettingsPanel, settings, onSettingsChange } from './settings'
 import { simulateMatch, simulateMatrix, summarize } from './sim'
 import { DamagePopups } from './dmgpop'
@@ -186,6 +186,8 @@ class MenuView implements View {
       const sway = Math.sin(this.t * 1.6 + i * 1.3) * 0.06
       m.rotation.y = (this.focusIdx === i ? Math.sin(this.t * 2.5) * 0.25 : sway)
       m.rotation.z = Math.sin(this.t * 2 + i) * 0.015
+      // リグ済みキャラは関節アイドル(注目中は少し大きく動かす)
+      if (m.userData.bones) animateSkeleton(m, this.t * 2.2 + i, this.focusIdx === i ? 0.35 : 0.14)
     })
 
     if (this.showcase) {

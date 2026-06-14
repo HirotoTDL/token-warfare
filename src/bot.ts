@@ -5,7 +5,7 @@ import { Sfx } from './sfx'
 import { TEAM_COLOR, ENERGY_MAX, TP_REGEN_BASE, enemyOf, falloffMul, type CharacterDef, type Team, type Unit } from './types'
 import { TOKENS, DecoyUnit, loadoutFor } from './tokens'
 import { buildMonsterCommander } from './models'
-import { getModel, animateGlbBody } from './modelLoader'
+import { getModel, animateGlbBody, animateSkeleton } from './modelLoader'
 
 function flatDist(a: THREE.Vector3, b: THREE.Vector3) {
   const dx = a.x - b.x
@@ -489,7 +489,8 @@ export class BotCommander implements Unit {
       })
       return
     }
-    animateGlbBody(this.group, this.animT, this.animAmp)
+    if (this.group.userData.bones) animateSkeleton(this.group, this.animT, this.animAmp)
+    else animateGlbBody(this.group, this.animT, this.animAmp)
   }
 
   private collide() {

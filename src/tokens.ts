@@ -7,7 +7,7 @@ import {
   buildGunner, buildSentry, buildHealDrone, buildStriker, buildSpiderMine,
   buildWall, buildBooster, buildChaser, buildBomber, buildJammer, buildSniperDrone, buildDecoy,
 } from './models'
-import { getModel, animateGlbBody } from './modelLoader'
+import { getModel, animateGlbBody, animateSkeleton } from './modelLoader'
 
 /** GLB(外部生成モデル)があれば優先、無ければプロシージャル */
 function resolveModel(key: string, team: Team, fallback: () => THREE.Group): THREE.Group {
@@ -165,7 +165,8 @@ export abstract class TokenUnit implements Unit {
       })
       return
     }
-    animateGlbBody(this.group, this.animT, this.animAmp)
+    if (this.group.userData.bones) animateSkeleton(this.group, this.animT, this.animAmp)
+    else animateGlbBody(this.group, this.animT, this.animAmp)
   }
 
   protected faceDir(dir: THREE.Vector3, dt: number) {

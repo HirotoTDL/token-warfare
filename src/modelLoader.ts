@@ -1,6 +1,7 @@
 import * as THREE from 'three'
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js'
 import { MeshoptDecoder } from 'three/examples/jsm/libs/meshopt_decoder.module.js'
+import { clone as cloneSkinned } from 'three/examples/jsm/utils/SkeletonUtils.js'
 import { TEAM_COLOR, type Team } from './types'
 
 /**
@@ -26,14 +27,20 @@ function normalize(scene: THREE.Object3D, targetHeight: number): THREE.Group {
   scene.position.x -= center.x
   scene.position.z -= center.z
   scene.position.y -= box2.min.y
+  let skinned = false
   scene.traverse((o) => {
     if ((o as THREE.Mesh).isMesh) {
       o.castShadow = true
       o.receiveShadow = true
     }
+    if ((o as THREE.SkinnedMesh).isSkinnedMesh) {
+      skinned = true
+      o.frustumCulled = false // スキン変形でAABBがずれて誤カリングされるのを防ぐ
+    }
   })
   const root = new THREE.Group()
   root.add(scene)
+  root.userData.skinned = skinned
   return root
 }
 
@@ -58,7 +65,9 @@ export function preloadModels(entries: { key: string; height: number }[]) {
 export function getModel(key: string, team: Team): THREE.Group | null {
   const src = cache.get(key)
   if (!src) return null
-  const clone = src.clone(true)
+  // スキン付き(リグ済み)は SkeletonUtils.clone でないと骨が壊れる
+  const skinned = !!src.userData.skinned
+  const clone = (skinned ? (cloneSkinned(src) as THREE.Group) : src.clone(true))
   const mats: THREE.MeshStandardMaterial[] = []
   clone.traverse((o) => {
     const mesh = o as THREE.Mesh
@@ -96,6 +105,18 @@ export function getModel(key: string, team: Team): THREE.Group | null {
     body.userData.baseY = body.position.y
     clone.userData.body = body
   }
+  // リグ済み: ボーンを名前で収集し、レスト回転を保存(関節アニメ用)
+  if (skinned) {
+    const bones: Record<string, THREE.Bone> = {}
+    clone.traverse((o) => {
+      if ((o as THREE.Bone).isBone) {
+        const bn = o as THREE.Bone
+        bones[bn.name] = bn
+        bn.userData.rest = bn.rotation.clone()
+      }
+    })
+    clone.userData.bones = bones
+  }
   return clone
 }
 
@@ -113,6 +134,43 @@ export function animateGlbBody(group: THREE.Group, animT: number, animAmp: numbe
   body.position.y = baseY + hover + bounce
   body.rotation.x = 0.16 * animAmp
   body.rotation.z = Math.sin(animT * 0.5) * 0.06 * animAmp
+}
+
+/**
+ * リグ済み(スケルトン付き)GLBの関節アニメ。Tripo自動リグの標準ボーン名を駆動。
+ * animAmp(0..1)=移動強度。歩行サイクル(脚前後振り・膝曲げ・腕逆相)＋常時アイドル(呼吸・首ゆれ)。
+ * クリップ無しでもコードで生き生きと動かす方式。
+ */
+export function animateSkeleton(group: THREE.Group, animT: number, animAmp: number) {
+  const bones = group.userData.bones as Record<string, THREE.Bone> | undefined
+  if (!bones) return
+  const amp = animAmp
+  const sw = Math.sin(animT) // 歩行位相
+  const sw2 = Math.sin(animT * 0.5) // ゆったり位相(アイドル)
+  const breathe = Math.sin(animT * 0.9)
+  const set = (name: string, axis: 'x' | 'y' | 'z', delta: number) => {
+    const b = bones[name]
+    if (!b) return
+    const rest = b.userData.rest as THREE.Euler
+    b.rotation[axis] = rest[axis] + delta
+  }
+  // 歩行: 脚を前後に振る(左右逆相)＋後ろ脚で膝を曲げる
+  set('L_Thigh', 'x', sw * 0.55 * amp)
+  set('R_Thigh', 'x', -sw * 0.55 * amp)
+  set('L_Calf', 'x', Math.max(0, -sw) * 0.7 * amp)
+  set('R_Calf', 'x', Math.max(0, sw) * 0.7 * amp)
+  // 腕は脚と逆相に振る(肘も軽く曲げる)
+  set('L_Upperarm', 'x', -sw * 0.4 * amp)
+  set('R_Upperarm', 'x', sw * 0.4 * amp)
+  set('L_Forearm', 'x', (0.25 + Math.max(0, sw) * 0.25) * amp)
+  set('R_Forearm', 'x', (0.25 + Math.max(0, -sw) * 0.25) * amp)
+  // 体幹: 前傾少々＋呼吸＋腰のひねり
+  set('Spine01', 'x', -0.07 * amp + breathe * 0.018)
+  set('Spine02', 'x', breathe * 0.02)
+  set('Waist', 'y', sw * 0.07 * amp)
+  // 首/頭のゆれ(常時の生命感)
+  set('Head', 'z', sw2 * 0.05)
+  set('NeckTwist01', 'x', breathe * 0.015)
 }
 
 /**
