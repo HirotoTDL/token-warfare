@@ -14,7 +14,12 @@ import { buildViewmodel } from './models'
 import { getScenery } from './modelLoader'
 import { settings } from './settings'
 
-const GRAVITY = 20
+const GRAVITY = 20 // 上昇時の基本重力
+const FALL_MULT = 1.7 // 落下時は重力を強めて締まったアーチに(浮わつき防止)
+const LOWJUMP_MULT = 3.0 // 上昇中にジャンプを離したら追加重力(短ホップ=可変ジャンプ高)
+const JUMP_VEL = 7.8
+const COYOTE_TIME = 0.11 // 縁を離れてからジャンプを許す猶予
+const STEP_HEIGHT = 0.4 // この高さ以下の段差は自動で乗り越える
 const EYE = 1.6
 const HALF = 0.4
 const HEIGHT = 1.7
@@ -111,6 +116,12 @@ export class PlayerCommander implements Unit {
   private shakeAmp = 0
   private recoilP = 0
   private recoilY = 0
+  // --- プレイ感(物理フィール) ---
+  private coyote = 0 // 接地後の猶予(縁を離れた直後も飛べる)
+  private jumpHeld = false // ジャンプ保持中か(可変ジャンプ高用)
+  private landDip = 0 // 着地のカメラ沈み込み量(自然減衰)
+  private prevVelY = 0 // 直前フレームの落下速度(着地衝撃の算出)
+  private stepPhase = 0 // 足音用の歩行位相
 
   constructor(
     world: World, combat: Combat, sfx: Sfx, input: Input,
@@ -213,16 +224,28 @@ export class PlayerCommander implements Unit {
     let speed = sprinting ? 8.5 : 6
     if (zoomed) speed *= 0.55
     if (this.charging) speed *= CHARGE_SPEED_MUL
-    const accel = this.onGround ? 12 : 3
+    // 地上は機敏に、空中もそこそこ利く(被弾回避・微調整が気持ちよく決まる)
+    const accel = this.onGround ? 13 : 5.5
     const k = 1 - Math.exp(-accel * dt)
     this.vel.x += (wish.x * speed - this.vel.x) * k
     this.vel.z += (wish.z * speed - this.vel.z) * k
 
-    if (input.keys.has('Space') && this.onGround) {
-      this.vel.y = 7.2
+    // --- ジャンプ(コヨーテタイム + 可変ジャンプ高 + 非対称重力) ---
+    this.coyote = this.onGround ? COYOTE_TIME : Math.max(0, this.coyote - dt)
+    const spaceDown = input.keys.has('Space')
+    // 接地中/猶予中に押下した瞬間だけ踏み切る(上昇中の連続発火は防ぐ)
+    if (spaceDown && !this.jumpHeld && this.coyote > 0 && this.vel.y <= 0.1) {
+      this.vel.y = JUMP_VEL
       this.onGround = false
+      this.coyote = 0
+      this.sfx.jump()
     }
-    this.vel.y -= GRAVITY * dt
+    this.jumpHeld = spaceDown
+    // 非対称重力: 落下は重く、上昇中にボタンを離すと一気に減速(短ホップ)
+    let g = GRAVITY
+    if (this.vel.y < 0) g *= FALL_MULT
+    else if (this.vel.y > 0 && !spaceDown) g *= LOWJUMP_MULT
+    this.vel.y -= g * dt
 
     if (this.dashT > 0) {
       this.dashT -= dt
@@ -244,13 +267,26 @@ export class PlayerCommander implements Unit {
     if (input.consume('KeyE') && this.skillCd <= 0) this.activateSkill(moving ? wish : fwd)
 
     // --- カメラ更新 ---
-    this.bobT += dt * (moving && this.onGround ? (sprinting ? 13 : 10) : 0)
+    const stepRate = sprinting ? 13 : 10
+    this.bobT += dt * (moving && this.onGround ? stepRate : 0)
     const bob = Math.sin(this.bobT) * 0.035 * (moving && this.onGround ? 1 : 0)
+    // 足音: 歩行位相が半周(=一歩)するたびに控えめに鳴らす
+    if (moving && this.onGround) {
+      this.stepPhase += dt * stepRate
+      if (this.stepPhase >= Math.PI) {
+        this.stepPhase -= Math.PI
+        this.sfx.footstep(sprinting ? 0.07 : 0.045)
+      }
+    } else {
+      this.stepPhase = Math.PI * 0.5 // 歩き出しの一歩目が早く出るように位相を進めておく
+    }
+    // 着地の沈み込み(自然に戻る)
+    this.landDip += (0 - this.landDip) * Math.min(1, dt * 11)
     // リコイルは視覚オフセットとして適用し、自動で戻る(エイムは安定)
     const decay = Math.exp(-dt * 9)
     this.recoilP *= decay
     this.recoilY *= decay
-    this.camera.position.set(this.pos.x, this.pos.y + EYE + bob, this.pos.z)
+    this.camera.position.set(this.pos.x, this.pos.y + EYE + bob - this.landDip, this.pos.z)
     this.camera.rotation.set(this.pitch + this.recoilP, this.yaw + this.recoilY, 0)
     // 被弾カメラシェイク
     if (this.shakeT > 0) {
@@ -259,7 +295,8 @@ export class PlayerCommander implements Unit {
       this.camera.rotation.x += (Math.random() - 0.5) * k
       this.camera.rotation.z += (Math.random() - 0.5) * k * 0.6
     }
-    const targetFov = zoomed ? w.zoomFov : 75
+    // スプリント中はFOVをわずかに広げて疾走感を出す
+    const targetFov = zoomed ? w.zoomFov : (sprinting && moving && this.onGround ? 82 : 75)
     if (Math.abs(this.camera.fov - targetFov) > 0.05) {
       this.camera.fov += (targetFov - this.camera.fov) * Math.min(1, dt * 14)
       this.camera.updateProjectionMatrix()
@@ -369,17 +406,33 @@ export class PlayerCommander implements Unit {
   private integrate(dt: number) {
     const cs = this.world.colliders
     const lim = this.world.arenaHalf - 0.8
+    const wasGrounded = this.onGround
+    const fallV = this.vel.y // 着地衝撃の判定用(重力適用後の下向き速度)
+
+    // 低い段差は壁で止めず自動で乗り越える(小さな縁に引っかからず気持ちよく動ける)
+    const tryStep = (c: { min: THREE.Vector3; max: THREE.Vector3 }) => {
+      const up = c.max.y - this.pos.y
+      if (this.vel.y <= 0.5 && up > 0.01 && up <= STEP_HEIGHT) {
+        this.pos.y = c.max.y
+        if (this.vel.y < 0) this.vel.y = 0
+        this.onGround = true
+        return true
+      }
+      return false
+    }
 
     this.pos.x += this.vel.x * dt
     this.pos.x = Math.max(-lim, Math.min(lim, this.pos.x))
     for (const c of cs) {
       if (!this.overlaps(c)) continue
+      if (tryStep(c)) continue
       this.pos.x = this.vel.x > 0 ? c.min.x - HALF : c.max.x + HALF
     }
     this.pos.z += this.vel.z * dt
     this.pos.z = Math.max(-lim, Math.min(lim, this.pos.z))
     for (const c of cs) {
       if (!this.overlaps(c)) continue
+      if (tryStep(c)) continue
       this.pos.z = this.vel.z > 0 ? c.min.z - HALF : c.max.z + HALF
     }
     const prevY = this.pos.y
@@ -401,6 +454,13 @@ export class PlayerCommander implements Unit {
         this.vel.y = 0
       }
     }
+    // 着地イベント: 落下からの接地時に衝撃の強さでカメラを沈ませSEを鳴らす
+    if (this.onGround && !wasGrounded && fallV < -3) {
+      const impact = Math.min(1, (-fallV - 3) / 11)
+      this.landDip = 0.05 + impact * 0.19
+      this.sfx.land(impact)
+    }
+    this.prevVelY = this.vel.y
   }
 
   private overlaps(c: { min: THREE.Vector3; max: THREE.Vector3 }) {

@@ -111,6 +111,24 @@ export class Sfx {
     setTimeout(() => this.tone(1320, 1760, 0.12, 0.16, 'triangle'), 90)
   }
 
+  /** ジャンプ(軽い踏み切り) */
+  jump() {
+    this.tone(420, 680, 0.09, 0.1, 'sine')
+    this.noise(0.05, 0.06, 1400, 1.4)
+  }
+
+  /** 着地(落下の強さ0..1で重さが変わる) */
+  land(impact = 0.5) {
+    const v = 0.12 + impact * 0.28
+    this.noise(0.1 + impact * 0.08, v, 150, 0.8, 'lowpass')
+    this.tone(150, 60, 0.1 + impact * 0.06, 0.1 + impact * 0.12, 'triangle')
+  }
+
+  /** 足音(控えめ。歩/走で音量) */
+  footstep(vol = 0.05) {
+    this.noise(0.045, vol, 480 + Math.random() * 220, 1.4, 'bandpass')
+  }
+
   /** コア回収 */
   core() {
     this.tone(660, 1320, 0.14, 0.2, 'triangle')
