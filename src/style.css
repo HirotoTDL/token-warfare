@@ -1,14 +1,16 @@
 * { margin: 0; padding: 0; box-sizing: border-box; }
 
 :root {
-  --blue: #3da8ff;
-  --red: #ff5040;
-  --pink: #ff4fa3;
-  --cyan: #29d3e8;
-  --yellow: #ffd23e;
-  --panel: rgba(12, 14, 26, 0.66);
-  --panel-line: rgba(150, 190, 255, 0.35);
-  --text: #f0f2fa;
+  --blue: #62b6ff;
+  --red: #ff7a8a;
+  --pink: #ff8fc6;     /* 桜ピンク(柔らか) */
+  --cyan: #74dcd8;     /* ミントティール */
+  --lav: #b6a0f2;      /* ラベンダー */
+  --mint: #9be6c8;
+  --yellow: #ffe08a;
+  --panel: rgba(22, 20, 40, 0.58);
+  --panel-line: rgba(196, 184, 255, 0.4);
+  --text: #f4eefb;
 }
 
 html, body { width: 100%; height: 100%; overflow: hidden; }
@@ -39,13 +41,15 @@ body {
 }
 
 .btn-main, .btn-sub {
-  font-family: inherit; cursor: pointer; color: var(--text);
-  border: 1px solid var(--panel-line);
-  background: linear-gradient(135deg, rgba(255, 79, 163, 0.85), rgba(120, 50, 200, 0.85));
-  font-size: 20px; letter-spacing: 0.25em; padding: 14px 56px; border-radius: 6px;
+  font-family: inherit; cursor: pointer; color: #fff;
+  border: 1px solid rgba(255, 255, 255, 0.45);
+  background: linear-gradient(135deg, var(--mint) 0%, var(--pink) 52%, var(--lav) 100%);
+  font-size: 20px; letter-spacing: 0.25em; padding: 14px 56px; border-radius: 24px;
+  text-shadow: 0 1px 3px rgba(120, 80, 140, 0.45);
+  box-shadow: 0 6px 18px rgba(180, 150, 240, 0.32), inset 0 1px 0 rgba(255, 255, 255, 0.5);
   transition: all 0.15s;
 }
-.btn-main:hover { box-shadow: 0 0 22px rgba(255, 79, 163, 0.6); transform: translateY(-2px); }
+.btn-main:hover { box-shadow: 0 0 26px rgba(255, 170, 220, 0.7), inset 0 1px 0 rgba(255, 255, 255, 0.6); transform: translateY(-2px); }
 .btn-sub { font-size: 15px; padding: 10px 28px; background: rgba(25, 30, 52, 0.85); letter-spacing: 0.15em; }
 .btn-sub:hover { background: rgba(45, 55, 95, 0.9); }
 
