@@ -904,6 +904,13 @@ window.addEventListener('resize', () => {
   sim: simulateMatch,
   simMatrix: simulateMatrix,
   simSummary: summarize,
+  // タブ非表示でrAFが止まってもフレームバッファを更新して撮影できるよう、手動でN frame回す(検証用)
+  renderNow(frames = 1) {
+    for (let i = 0; i < Math.max(1, frames); i++) {
+      view.update(1 / 60)
+      view.render()
+    }
+  },
 }
 
 // --- メインループ ---
