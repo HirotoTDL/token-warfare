@@ -27,8 +27,17 @@ import { RoomEnvironment } from 'three/examples/jsm/environments/RoomEnvironment
 
 // --- 基盤 ---
 const app = document.getElementById('app')!
-const renderer = new THREE.WebGLRenderer({ antialias: true })
-renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2))
+const renderer = new THREE.WebGLRenderer({ antialias: true, powerPreference: 'high-performance' })
+// 描画解像度の上限。高DPI機(4K/Retina)でのオーバードローを抑える(2.0→1.5。見た目はほぼ不変、断片シェーダ負荷は約44%減)。
+// 想定端末は10年前のゲーミングPC〜やや上の事務PC。高DPIでもこの上限で十分シャープ。
+const BASE_PR = Math.min(window.devicePixelRatio, 1.5)
+let qScale = 1 // 動的解像度スケール[0.6..1]: 処理落ち時のみ自動で解像度を下げ、余裕が戻れば上げる
+function applyPixelRatio() {
+  const pr = BASE_PR * qScale
+  renderer.setPixelRatio(pr)
+  postfx.setPixelRatio(pr)
+}
+renderer.setPixelRatio(BASE_PR)
 renderer.setSize(window.innerWidth, window.innerHeight)
 renderer.shadowMap.enabled = true
 renderer.shadowMap.type = THREE.PCFSoftShadowMap
@@ -895,12 +904,28 @@ window.addEventListener('resize', () => {
 
 // --- メインループ ---
 const clock = new THREE.Clock()
+// 動的解像度コントローラ: 0.5秒窓の平均フレーム時間を見て、重ければ解像度を下げ軽ければ戻す。
+// 高性能機は常時フル、非力機は自動で軽くなり処理落ちを避ける(見た目より滑らかさを優先する局面のみ作動)。
+let perfWin = 0, perfAcc = 0, perfN = 0, perfWarmup = 3
 renderer.setAnimationLoop(() => {
   try {
     const dt = Math.min(0.05, clock.getDelta())
     view.update(dt)
     view.render()
     input.endFrame()
+    // --- 動的解像度 ---
+    perfAcc += dt; perfN++; perfWin += dt
+    if (perfWin >= 0.5) {
+      const avgMs = (perfAcc / Math.max(1, perfN)) * 1000
+      perfWin = 0; perfAcc = 0; perfN = 0
+      if (perfWarmup > 0) { perfWarmup-- } // 起動直後のヒッチで誤判定しないよう数窓スキップ
+      else {
+        let nq = qScale
+        if (avgMs > 21 && qScale > 0.6) nq = Math.max(0.6, qScale - 0.12)        // 約47fps未満→下げる
+        else if (avgMs < 13 && qScale < 1) nq = Math.min(1, qScale + 0.06)        // 約77fps超で余裕→戻す
+        if (nq !== qScale) { qScale = nq; applyPixelRatio() }
+      }
+    }
   } catch (e) {
     console.error('[loop error]', e)
   }

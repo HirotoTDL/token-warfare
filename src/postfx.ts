@@ -37,4 +37,10 @@ export class PostFX {
   resize(w: number, h: number) {
     this.composer.setSize(w, h)
   }
+
+  /** 動的解像度: レンダラのpixelRatio変更に合わせてComposerの内部RTも追従させる */
+  setPixelRatio(pr: number) {
+    this.composer.setPixelRatio(pr)
+    this.composer.setSize(window.innerWidth, window.innerHeight)
+  }
 }

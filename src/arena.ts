@@ -138,7 +138,9 @@ export function buildArena(world: World, mapKey = 'skyhaven', lite = false) {
   const sun = new THREE.DirectionalLight(crystal ? 0xeaf6ff : dusk ? 0xffc090 : 0xfff2e0, crystal ? 2.85 : dusk ? 2.3 : 2.7)
   sun.position.copy(sunDir)
   sun.castShadow = true
-  sun.shadow.mapSize.set(2048, 2048)
+  // 2048→1024: シャドウ描画は解像度スケールでは下がらない固定負荷。スタイライズドの柔らかい影なら1024で十分。
+  // 非力GPUの常時負荷を約75%削減(±55の広域カバーは維持)。
+  sun.shadow.mapSize.set(1024, 1024)
   sun.shadow.camera.left = -55
   sun.shadow.camera.right = 55
   sun.shadow.camera.top = 55
