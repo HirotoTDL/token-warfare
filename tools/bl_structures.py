@@ -422,6 +422,56 @@ def build_rock():
             OBJS[-1].scale = (1.1, 1.1, 0.4)
 
 
+def build_spawnpad():
+    # スポーン地点の壇: 段つき円形ダイス + Codexの魔法陣床 + 金縁 + 周囲の宝石 + 四隅の親柱
+    EMB = tex_mat("emb", "tex_spawn_emblem.png", 1.0, 0.4, emit_from_tex=0.8)
+    # 段つき台座(回転体)
+    revolve([(0, 0), (2.7, 0), (2.7, 0.22), (2.4, 0.3), (2.5, 0.4), (2.1, 0.5), (2.15, 0.56), (1.95, 0.62), (0, 0.64)], MARBLE, 48, "spbase", 1)
+    # 魔法陣の床(一度だけ貼る薄い円盤)
+    add('primitive_cylinder_add', EMB, smooth=True, vertices=48, radius=1.92, depth=0.06, location=(0, 0, 0.66))
+    # 金縁リング
+    add('primitive_torus_add', GOLD, major_radius=1.98, minor_radius=0.06, location=(0, 0, 0.64), major_segments=56, minor_segments=10)
+    # 周囲の宝石インセット
+    for k in range(8):
+        ang = k / 8 * math.tau
+        add('primitive_ico_sphere_add', CRYST, smooth=False, radius=0.12, location=(2.3 * math.cos(ang), 2.3 * math.sin(ang), 0.6), subdivisions=1)
+    # 四隅の親柱(旋盤バラスターを拡大)+フィニアル
+    for k in range(4):
+        ang = k / 4 * math.tau + math.radians(45)
+        p = revolve([(x * 1.6, z * 1.7 + 0.6) for (x, z) in BAL_PROFILE], MARBLE, 24, "sppost", 1)
+        p.location = (2.2 * math.cos(ang), 2.2 * math.sin(ang), 0)
+        add('primitive_ico_sphere_add', GOLD, smooth=True, radius=0.13, location=(2.2 * math.cos(ang), 2.2 * math.sin(ang), 1.85), subdivisions=2)
+
+
+def build_emblem():
+    # 中央の回転モチーフ: 八面体の代わりに、金リングに抱かれた多面クリスタル+周囲の小宝石
+    JEWELM = solid_mat("jw", (0.66, 0.92, 1.0), 0.06, 0.0, emit=2.0)
+    PINK = solid_mat("pk", (1.0, 0.6, 0.85), 0.1, 0.0, emit=1.6)
+    # 中央の大クリスタル(上下の尖り)
+    add('primitive_cone_add', JEWELM, smooth=False, vertices=6, radius1=0.34, radius2=0, depth=0.7, location=(0, 0, 0.35))
+    add('primitive_cone_add', JEWELM, smooth=False, vertices=6, radius1=0.34, radius2=0, depth=0.7, location=(0, 0, -0.35), rotation=(math.radians(180), 0, 0))
+    add('primitive_cylinder_add', JEWELM, smooth=False, vertices=6, radius=0.34, depth=0.18, location=(0, 0, 0))
+    # 周囲の小宝石6
+    for k in range(6):
+        ang = k / 6 * math.tau
+        add('primitive_ico_sphere_add', PINK if k % 2 else JEWELM, smooth=False, radius=0.12, location=(0.62 * math.cos(ang), 0.62 * math.sin(ang), 0), subdivisions=1)
+    # 金の周回リング2本(交差)
+    g1 = add('primitive_torus_add', GOLD, major_radius=0.66, minor_radius=0.04, location=(0, 0, 0), major_segments=40, minor_segments=8)
+    g2 = add('primitive_torus_add', GOLD, major_radius=0.66, minor_radius=0.04, location=(0, 0, 0), major_segments=40, minor_segments=8); g2.rotation_euler = (math.radians(90), 0, 0)
+
+
+def build_crystal():
+    # クリスタル泉の大クリスタル: 多数の六角プリズム・シャードを束ねた群晶
+    CORE = solid_mat("cc", (0.62, 0.9, 1.0), 0.05, 0.0, emit=1.7)
+    CORE2 = solid_mat("cc2", (0.78, 0.7, 1.0), 0.08, 0.0, emit=1.3)
+    shards = [(0, 0, 5.4, 0.5, 0, 0), (0.55, 0.3, 3.6, 0.34, 14, 20), (-0.5, 0.35, 3.2, 0.3, -12, 40),
+              (0.4, -0.45, 3.0, 0.3, 16, -30), (-0.45, -0.4, 3.4, 0.32, -14, 60), (0.0, 0.6, 2.6, 0.26, 10, 90)]
+    for (sx, sy, h, r, tlt, rot) in shards:
+        add('primitive_cone_add', CORE if abs(sx) + abs(sy) < 0.3 else CORE2, smooth=False, vertices=6, radius1=r, radius2=r * 0.12, depth=h, location=(sx, sy, h / 2 - 0.3), rotation=(math.radians(tlt) * math.cos(math.radians(rot)), math.radians(tlt) * math.sin(math.radians(rot)), math.radians(rot)))
+    # 根本の岩座
+    revolve([(0, 0), (1.0, 0), (0.95, 0.25), (0.7, 0.4), (0, 0.42)], STONE, 16, "cbase", 1)
+
+
 def build_hill():
     # 遠景の丸い丘(回転体の緑の盛り上がり + 岩の露出 + 頂の小クリスタル群)。フォグに溶ける背景用。
     GRASS = tex_mat("grass", "tex_grass_flower_meadow.png", 1.6, 0.9)
@@ -439,7 +489,8 @@ def build_hill():
 BUILDERS = {'pillar': build_pillar, 'gate': build_gate, 'obelisk': build_obelisk, 'brazier': build_brazier,
             'canopy': build_canopy, 'railing': build_railing, 'island': build_island,
             'fairytower': build_fairytower, 'hill': build_hill,
-            'grass': build_grass, 'flowers': build_flowers, 'mushroom': build_mushroom, 'rock': build_rock}
+            'grass': build_grass, 'flowers': build_flowers, 'mushroom': build_mushroom, 'rock': build_rock,
+            'emblem': build_emblem, 'crystal': build_crystal, 'spawnpad': build_spawnpad}
 BUILDERS[kind]()
 
 bpy.ops.object.select_all(action='DESELECT')

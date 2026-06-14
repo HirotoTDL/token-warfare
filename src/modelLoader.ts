@@ -212,6 +212,10 @@ export const MODEL_MANIFEST: { key: string; height: number }[] = [
   // 地表の散布物(自作の草/花/キノコ/小石。配置時に個別スケール)
   { key: 'scatter_grass', height: 1 }, { key: 'scatter_flowers', height: 1 },
   { key: 'scatter_mushroom', height: 1 }, { key: 'scatter_rock', height: 1 },
+  // 中央モチーフ/クリスタル泉(八面体・コーンの置換)
+  { key: 'struct_emblem', height: 1.4 }, { key: 'struct_crystal', height: 5.8 },
+  // 基地のスポーン壇(円柱パッドの置換)
+  { key: 'struct_spawnpad', height: 2.0 },
   // フェアリィ3Dプロップ(手続きプロップの格上げ)
   { key: 'prop_fountain', height: 2.6 }, { key: 'prop_chest', height: 1.0 },
   { key: 'prop_mushroom', height: 2.2 }, { key: 'prop_lamp', height: 3.4 },

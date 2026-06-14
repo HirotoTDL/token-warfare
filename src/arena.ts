@@ -326,18 +326,32 @@ export function buildArena(world: World, mapKey = 'skyhaven') {
   const pillarMat = new THREE.MeshStandardMaterial({ color: 0x8a94a2, roughness: 0.5, metalness: 0.45 })
   applyExtTexture(pillarMat, 'tex_jewel_inlay_panel', [1, 2])
 
-  // 回転エンブレム(両マップ共通の中央モチーフ)
+  // 回転エンブレム(両マップ共通の中央モチーフ)。八面体は廃し、作り込みの宝石モチーフ(struct_emblem)へ。
   function emblemAt(x: number, y: number, z: number) {
     const emblemMat = new THREE.MeshStandardMaterial({
       color: 0xffe066, emissive: 0xcfa830, emissiveIntensity: 0.9,
       metalness: 0.8, roughness: 0.3,
     })
-    const emblem = new THREE.Mesh(new THREE.OctahedronGeometry(0.7), emblemMat)
-    emblem.position.set(x, y, z)
-    scene.add(emblem)
+    const fallback = new THREE.Mesh(new THREE.OctahedronGeometry(0.7), emblemMat)
+    fallback.position.set(x, y, z)
+    scene.add(fallback)
+    const holder = { node: fallback as THREE.Object3D }
+    let swapped = false
+    const trySwap = () => {
+      if (swapped) return
+      const g = getScenery('struct_emblem')
+      if (!g) return
+      swapped = true
+      const bb = new THREE.Box3().setFromObject(g)
+      g.scale.multiplyScalar(1.4 / Math.max(0.3, bb.max.y - bb.min.y))
+      g.position.set(x, y, z)
+      scene.add(g); scene.remove(fallback); holder.node = g
+    }
+    trySwap()
+    if (!swapped) updates.push(trySwap)
     updates.push((dt, t) => {
-      emblem.rotation.y += dt * 0.8
-      emblem.position.y = y + Math.sin(t * 1.2) * 0.18
+      holder.node.rotation.y += dt * 0.8
+      holder.node.position.y = y + Math.sin(t * 1.2) * 0.18
     })
   }
 
@@ -384,9 +398,27 @@ export function buildArena(world: World, mapKey = 'skyhaven') {
       color: 0x9fe8ff, emissive: 0x4fc6ff, emissiveIntensity: 0.55,
       metalness: 0.2, roughness: 0.22, transparent: true, opacity: 0.92,
     })
-    // 中央の大クリスタル群(登れない遮蔽。各シャードを衝突体に)
+    // 中央の大クリスタル群(登れない遮蔽。各シャードを衝突体に)。視覚は作り込みの群晶(struct_crystal)へ差し替え。
+    const shardMeshes: THREE.Object3D[] = []
     for (const [px, pz, h] of [[0, 0, 5.6], [2.7, 1.5, 3.8], [-2.5, 1.7, 3.3], [1.9, -2.3, 3.1], [-2.1, -2.1, 3.6]] as const) {
-      solid(new THREE.ConeGeometry(h * 0.34, h, 6), crystalMat, px, h / 2, pz, aabb(px, pz, h * 0.6, h, h * 0.6))
+      shardMeshes.push(solid(new THREE.ConeGeometry(h * 0.34, h, 6), crystalMat, px, h / 2, pz, aabb(px, pz, h * 0.6, h, h * 0.6)))
+    }
+    {
+      let cdone = false
+      const tryCry = () => {
+        if (cdone) return
+        const g = getScenery('struct_crystal')
+        if (!g) return
+        cdone = true
+        const bb = new THREE.Box3().setFromObject(g)
+        g.scale.multiplyScalar(6.0 / Math.max(0.3, bb.max.y - bb.min.y))
+        g.position.set(0, -0.1, 0)
+        g.traverse((o) => { const m = o as THREE.Mesh; if (m.isMesh) { m.castShadow = true; m.receiveShadow = true } })
+        scene.add(g)
+        for (const s of shardMeshes) s.visible = false
+      }
+      tryCry()
+      if (!cdone) updates.push(tryCry)
     }
     emblemAt(0, 4.6, 0)
     // 対角のクリスタル壁(射線カット)
@@ -411,18 +443,22 @@ export function buildArena(world: World, mapKey = 'skyhaven') {
   } else {
     // ===== スカイガーデン(立体構造・高所争奪): 中央コマンドデッキ＋段差＋四隅足場 =====
     // プラットフォーム素材(後でテクスチャ張替)。上に立てる箱コライダー。
-    const deckMat = new THREE.MeshStandardMaterial({ color: 0xb9c4d4, roughness: 0.7, metalness: 0.25 })
-    const stepMat = new THREE.MeshStandardMaterial({ color: 0x9aa6ba, roughness: 0.72, metalness: 0.2 })
-    applyExtTexture(deckMat, 'tex_deck', [3, 3])
-    applyExtTexture(stepMat, 'tex_step', [2, 1])
+    // Codex生成のステージ専用テクスチャを適用(石タイル/魔法陣床)
+    const deckMat = new THREE.MeshStandardMaterial({ color: 0xc8d2e0, roughness: 0.65, metalness: 0.2 })
+    const stepMat = new THREE.MeshStandardMaterial({ color: 0xb6c0d0, roughness: 0.68, metalness: 0.18 })
+    applyExtTexture(deckMat, 'tex_platform_tile', [2, 2])
+    applyExtTexture(stepMat, 'tex_platform_tile', [1.2, 0.6])
+    // 中央コマンドデッキ専用: 発光する魔法陣を一度だけ床に敷く(タイルせず中央に大きく)
+    const deckCentralMat = new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.5, metalness: 0.15, emissive: 0x2a4a6a, emissiveIntensity: 0.25 })
+    applyExtTexture(deckCentralMat, 'tex_deck_runic', [1, 1])
     // 床から topY までの箱。上面に乗れる(プレイヤー)。
     const goldTrim = new THREE.MeshStandardMaterial({ color: 0xf2c75a, emissive: 0x6b5316, emissiveIntensity: 0.35, metalness: 0.9, roughness: 0.3 })
     const fasciaMat = new THREE.MeshStandardMaterial({ color: 0xaeb9cc, roughness: 0.55, metalness: 0.35 })
     applyExtTexture(fasciaMat, 'tex_cream_gold_molding', [3, 1])
     const platform = (cx: number, cz: number, w: number, d: number, topY: number, mat = deckMat) => {
       solid(new THREE.BoxGeometry(w, topY, d), mat, cx, topY / 2, cz, aabb(cx, cz, w, topY, d))
-      // 主要床(deckMat)は縁に張り出しコーニス(繰形)+金トリム線を回して建築的に仕上げる
-      if (mat === deckMat) {
+      // 主要床(deckMat/中央魔法陣床)は縁に張り出しコーニス(繰形)+金トリム線を回して建築的に仕上げる
+      if (mat === deckMat || mat === deckCentralMat) {
         const fascia = new THREE.Mesh(new THREE.BoxGeometry(w + 0.5, 0.34, d + 0.5), fasciaMat)
         fascia.position.set(cx, topY - 0.2, cz); fascia.castShadow = true; fascia.receiveShadow = true
         scene.add(fascia)
@@ -462,7 +498,7 @@ export function buildArena(world: World, mapKey = 'skyhaven') {
 
     // --- 中央コマンドデッキ(高所拠点 top=2.4, 12x12)。中央を取ると有利、3方向から登れる ---
     const DECK = 2.4
-    platform(0, 0, 12, 12, DECK)
+    platform(0, 0, 12, 12, DECK, deckCentralMat)
     // 登り口ステップ(各≤1.1mでジャンプ登攀可)。北/南東/南西の3ルート
     platform(0, 8.4, 5.5, 2.0, 0.8, stepMat); platform(0, 6.9, 5.5, 2.2, 1.6, stepMat)
     platform(8.4, -5.0, 2.0, 5.5, 0.8, stepMat); platform(6.9, -5.0, 2.2, 5.5, 1.6, stepMat)
@@ -679,31 +715,49 @@ export function buildArena(world: World, mapKey = 'skyhaven') {
   for (const team of ['blue', 'red'] as Team[]) {
     const bp = world.basePos[team]
     const tc = TEAM_COLOR[team]
+    // 基地の壇: 円柱パッドを即表示し、作り込みのスポーン壇(struct_spawnpad)へ差し替え
     const pad = new THREE.Mesh(
       new THREE.CylinderGeometry(5.5, 5.8, 0.3, 28),
       new THREE.MeshStandardMaterial({ color: 0x4a525e, roughness: 0.6, metalness: 0.4 }),
     )
     pad.position.set(bp.x, 0.15, bp.z)
     pad.receiveShadow = true
-    pad.castShadow = true
     scene.add(pad)
+    {
+      let pdone = false
+      const tryPad = () => {
+        if (pdone) return
+        const g = getScenery('struct_spawnpad')
+        if (!g) return
+        pdone = true
+        const bb = new THREE.Box3().setFromObject(g)
+        g.scale.multiplyScalar(11 / Math.max(0.3, bb.max.x - bb.min.x)) // 直径≈11へ
+        g.position.set(bp.x, -0.02, bp.z)
+        g.traverse((o) => { const m = o as THREE.Mesh; if (m.isMesh) { m.castShadow = true; m.receiveShadow = true } })
+        scene.add(g); pad.visible = false
+      }
+      tryPad()
+      if (!pdone) updates.push(tryPad)
+    }
+    // チーム色の発光リング(陣営識別)
     const ring = new THREE.Mesh(
-      new THREE.TorusGeometry(4.9, 0.1, 8, 40),
+      new THREE.TorusGeometry(4.9, 0.12, 10, 48),
       new THREE.MeshStandardMaterial({ color: tc, emissive: tc, emissiveIntensity: 1.4 }),
     )
     ring.rotation.x = -Math.PI / 2
-    ring.position.set(bp.x, 0.32, bp.z)
+    ring.position.set(bp.x, 0.5, bp.z)
     scene.add(ring)
-    const wallM = new THREE.MeshStandardMaterial({ color: 0x808a96, roughness: 0.6, metalness: 0.4 })
+    // 両脇の柱(コライダー)を作り込みの装飾柱(struct_pillar)へ差し替え。頂部にチーム色の宝珠。
     for (const sx of [-4, 4]) {
       const px = bp.x + sx
       const pz = bp.z
-      solid(new THREE.BoxGeometry(1, 4.2, 1), wallM, px, 2.1, pz, aabb(px, pz, 1, 4.2, 1), false)
+      const col = solid(new THREE.BoxGeometry(1, 4.2, 1), new THREE.MeshStandardMaterial({ color: 0x808a96, roughness: 0.6, metalness: 0.4 }), px, 2.1, pz, aabb(px, pz, 1, 4.2, 1), false)
+      craftedSwap([col], 'struct_pillar', px, pz, 4.2, 0, 0)
       const cap = new THREE.Mesh(
-        new THREE.BoxGeometry(1.15, 0.25, 1.15),
-        new THREE.MeshStandardMaterial({ color: tc, emissive: tc, emissiveIntensity: 1.2 }),
+        new THREE.SphereGeometry(0.28, 14, 12),
+        new THREE.MeshStandardMaterial({ color: tc, emissive: tc, emissiveIntensity: 1.4 }),
       )
-      cap.position.set(px, 4.35, pz)
+      cap.position.set(px, 4.6, pz)
       scene.add(cap)
     }
     const bannerMat = new THREE.MeshBasicMaterial({
@@ -722,17 +776,17 @@ export function buildArena(world: World, mapKey = 'skyhaven') {
     )
   }
 
-  // --- ランプポスト(ピンク/シアンのネオン) ---
+  // --- ランプポスト(作り込みのprop_lamp。色付き点光源で陣営/ネオンの彩り) ---
   const poleMat = new THREE.MeshStandardMaterial({ color: 0x39414e, roughness: 0.6, metalness: 0.5 })
   let lampIdx = 0
   for (const [lx, lz] of [[15, 15], [-15, 15], [15, -15], [-15, -15]] as const) {
     const neon = lampIdx++ % 2 ? 0xff4fa3 : 0x29d3e8
+    // 手続きの仮ポスト(即表示)
     const pole = new THREE.Mesh(new THREE.CylinderGeometry(0.08, 0.1, 3.6, 8), poleMat)
-    pole.position.set(lx, 1.8, lz)
-    pole.castShadow = true
+    pole.position.set(lx, 1.8, lz); pole.castShadow = true
     scene.add(pole)
     const head = new THREE.Mesh(
-      new THREE.BoxGeometry(0.35, 0.2, 0.35),
+      new THREE.SphereGeometry(0.22, 14, 12),
       new THREE.MeshStandardMaterial({ color: neon, emissive: neon, emissiveIntensity: 1.6 }),
     )
     head.position.set(lx, 3.7, lz)
@@ -740,6 +794,21 @@ export function buildArena(world: World, mapKey = 'skyhaven') {
     const light = new THREE.PointLight(neon, 12, 15, 2)
     light.position.set(lx, 3.5, lz)
     scene.add(light)
+    // 作り込みランタンへ差し替え
+    let ldone = false
+    const tryLamp = () => {
+      if (ldone) return
+      const g = getScenery('prop_lamp')
+      if (!g) return
+      ldone = true
+      const bb = new THREE.Box3().setFromObject(g)
+      g.scale.multiplyScalar(3.8 / Math.max(0.3, bb.max.y - bb.min.y))
+      g.position.set(lx, -0.05, lz)
+      g.traverse((o) => { const m = o as THREE.Mesh; if (m.isMesh) { m.castShadow = true; m.receiveShadow = true } })
+      scene.add(g); pole.visible = false; head.visible = false
+    }
+    tryLamp()
+    if (!ldone) updates.push(tryLamp)
   }
 
   // --- エナジーコア出現スポット(レイアウト側で未設定ならデフォルト) ---
