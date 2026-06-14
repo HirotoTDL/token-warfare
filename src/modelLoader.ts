@@ -200,6 +200,12 @@ export const MODEL_MANIFEST: { key: string; height: number }[] = [
   // ステージ装飾構造物(フェアリィ世界観)
   { key: 'struct_tower', height: 14 }, { key: 'struct_house', height: 6 },
   { key: 'struct_arch', height: 8 },
+  // 作り込み構造物(中央監視塔の柱/天蓋・グランドゲート。craftedSwapで再スケール)
+  { key: 'struct_pillar', height: 3.4 }, { key: 'struct_canopy', height: 2.8 },
+  { key: 'struct_gate', height: 6.0 },
+  // 追加ランドマーク/装飾(欄干・浮遊島・かがり火・ルーンオベリスク)
+  { key: 'struct_railing', height: 1.2 }, { key: 'struct_island', height: 7 },
+  { key: 'struct_brazier', height: 2.4 }, { key: 'struct_obelisk', height: 7 },
   // フェアリィ3Dプロップ(手続きプロップの格上げ)
   { key: 'prop_fountain', height: 2.6 }, { key: 'prop_chest', height: 1.0 },
   { key: 'prop_mushroom', height: 2.2 }, { key: 'prop_lamp', height: 3.4 },

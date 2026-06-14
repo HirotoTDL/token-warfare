@@ -249,8 +249,12 @@ export function buildArena(world: World, mapKey = 'skyhaven') {
   // 手続き遮蔽メッシュを、作り込み3Dモデルがロード次第差し替える(コライダー/カバー点は不変)。
   // ロード前は手続きメッシュがフォールバック表示される。
   let craftIdx = 0
-  function craftedSwap(fallback: THREE.Object3D[], key: string, cx: number, cz: number, targetH: number) {
-    const ry = (craftIdx++ * 2.39) % (Math.PI * 2)
+  // baseY: 設置する足元の高さ(デッキ上の構造物は DECK 等を渡す)。ryFix: 回転を固定したい場合に指定。
+  function craftedSwap(
+    fallback: THREE.Object3D[], key: string, cx: number, cz: number, targetH: number,
+    baseY = -0.05, ryFix?: number,
+  ) {
+    const ry = ryFix ?? (craftIdx++ * 2.39) % (Math.PI * 2)
     let done = false
     const tryPlace = () => {
       if (done) return
@@ -261,7 +265,7 @@ export function buildArena(world: World, mapKey = 'skyhaven') {
       const bb = new THREE.Box3().setFromObject(g)
       const hNow = bb.max.y - bb.min.y
       g.scale.multiplyScalar(targetH / Math.max(0.3, hNow))
-      g.position.set(cx, -0.05, cz)
+      g.position.set(cx, baseY, cz)
       g.rotation.y = ry
       g.traverse((o) => { const mm = o as THREE.Mesh; if (mm.isMesh) { mm.castShadow = true; mm.receiveShadow = true } })
       scene.add(g)
@@ -348,15 +352,18 @@ export function buildArena(world: World, mapKey = 'skyhaven') {
     // 大通りの長壁(中央に横断ギャップ)
     wall(7, -9, 0.9, 12, 2.6); wall(-7, -9, 0.9, 12, 2.6)
     wall(7, 9, 0.9, 12, 2.6); wall(-7, 9, 0.9, 12, 2.6)
-    // 中央ゲート(プラザの目印)
+    // 中央ゲート(プラザの目印)。箱柱はコライダーとして残し、視覚はグランドゲート(struct_gate)へ差し替え。
+    const gateParts: THREE.Object3D[] = []
     for (const px of [-2.4, 2.4]) {
-      solid(new THREE.BoxGeometry(1.0, 5.0, 1.0), pillarMat, px, 2.5, 0, aabb(px, 0, 1.0, 5.0, 1.0))
+      gateParts.push(solid(new THREE.BoxGeometry(1.0, 5.0, 1.0), pillarMat, px, 2.5, 0, aabb(px, 0, 1.0, 5.0, 1.0)))
     }
     const beam = new THREE.Mesh(new THREE.BoxGeometry(6.2, 0.5, 1.2), wallMat)
     beam.position.y = 5.2
     beam.castShadow = true
     scene.add(beam)
     world.obstacleMeshes.push(beam)
+    gateParts.push(beam)
+    craftedSwap(gateParts, 'struct_gate', 0, 0, 5.6, 0, 0)
     emblemAt(0, 3.6, 0)
     // 側道フィールドのクレート群
     crate(16, 5, 2.2); crate(-16, -5, 2.2)
@@ -461,11 +468,13 @@ export function buildArena(world: World, mapKey = 'skyhaven') {
     barrel(12.5, 12.5); barrel(-12.5, -12.5); barrel(19, 0); barrel(-19, 0)
 
     // --- 中央監視塔(デッキ上に屹立。ランドマーク+最上部の見張り台) ---
+    // 箱柱はコライダーとして残し、視覚は作り込みの装飾柱(struct_pillar)に差し替え。
     for (const [px, pz] of [[2.6, 2.6], [-2.6, 2.6], [2.6, -2.6], [-2.6, -2.6]] as const) {
-      solid(new THREE.BoxGeometry(1.0, 3.4, 1.0), pillarMat, px, DECK + 1.7, pz, {
+      const col = solid(new THREE.BoxGeometry(1.0, 3.4, 1.0), pillarMat, px, DECK + 1.7, pz, {
         min: new THREE.Vector3(px - 0.5, DECK, pz - 0.5),
         max: new THREE.Vector3(px + 0.5, DECK + 3.4, pz + 0.5),
       }, false)
+      craftedSwap([col], 'struct_pillar', px, pz, 3.4, DECK, 0)
     }
     const roof = new THREE.Mesh(new THREE.BoxGeometry(7.2, 0.5, 7.2), wallMat)
     roof.position.y = DECK + 3.85
@@ -473,6 +482,8 @@ export function buildArena(world: World, mapKey = 'skyhaven') {
     roof.receiveShadow = true
     scene.add(roof)
     world.obstacleMeshes.push(roof)
+    // 箱屋根の視覚を作り込みの天蓋(struct_canopy)へ差し替え(コライダーである箱は不可視で残す)
+    craftedSwap([roof], 'struct_canopy', 0, 0, 2.9, DECK + 3.4, 0)
     const neonRing = new THREE.Mesh(
       new THREE.TorusGeometry(3.9, 0.08, 8, 40),
       new THREE.MeshStandardMaterial({ color: 0xff4fa3, emissive: 0xff4fa3, emissiveIntensity: 1.6 }),
@@ -829,6 +840,9 @@ export function buildArena(world: World, mapKey = 'skyhaven') {
       ['struct_house', edge, -edge * 0.55, 1.1],
       ['struct_arch', 0, -edge, 1.2],
       ['struct_arch', 0, edge, 1.2],
+      // ルーンオベリスク(プレイ縁の対角に屹立するランドマーク)
+      ['struct_obelisk', edge * 0.7, -edge * 0.7, 1.6],
+      ['struct_obelisk', -edge * 0.7, edge * 0.7, 1.6],
     ]
     for (const [key, x, z, sc] of placements) {
       let placed = false
@@ -848,6 +862,37 @@ export function buildArena(world: World, mapKey = 'skyhaven') {
       }
       tryPlace()
       if (!placed) updates.push(() => tryPlace())
+    }
+
+    // 任意位置(浮遊高さ可)に装飾GLBを遅延配置する汎用ヘルパ
+    const placeDeco = (key: string, x: number, y: number, z: number, sc: number, ry: number, float = false) => {
+      let placed = false
+      const phase = x + z
+      const tryP = () => {
+        if (placed) return
+        const g = getScenery(key)
+        if (!g) return
+        placed = true
+        g.position.set(x, y, z)
+        g.scale.multiplyScalar(sc)
+        g.rotation.y = ry
+        g.traverse((o) => { const m = o as THREE.Mesh; if (m.isMesh) m.castShadow = m.receiveShadow = true })
+        scene.add(g)
+        if (float) updates.push((_dt, t) => { g.position.y = y + Math.sin(t * 0.35 + phase) * 0.6 })
+      }
+      tryP()
+      if (!placed) updates.push(() => tryP())
+    }
+
+    // 詳細な浮遊島(中距離・草地が見える高さ。ふわふわ上下)
+    for (let i = 0; i < 5; i++) {
+      const a = (i / 5) * Math.PI * 2 + 0.5
+      const r = 78 + (i % 3) * 16
+      placeDeco('struct_island', Math.cos(a) * r, 16 + (i % 4) * 5, Math.sin(a) * r, 2.2 + (i % 2) * 0.8, a * 1.7, true)
+    }
+    // 中央デッキを囲むかがり火(発光のランドマーク。地上の四隅近く)
+    for (const [bx, bz] of [[12, 0], [-12, 0], [0, 12], [0, -12]] as const) {
+      placeDeco('struct_brazier', bx, 0, bz, 1.0, 0, false)
     }
   }
 
