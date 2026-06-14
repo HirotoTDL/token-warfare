@@ -127,6 +127,8 @@ export class World {
   arenaHalf = 40
   nav = new NavGrid(40)
   time = 0
+  /** ヘッドレスsim中はtrue。装飾的なfx(供給ビーム等)を省いて高速化する */
+  headless = false
   onKill: ((victim: Unit, killer: Unit | null) => void) | null = null
   onDamage: ((victim: Unit, attacker: Unit | null, amount: number) => void) | null = null
 

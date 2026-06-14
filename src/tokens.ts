@@ -308,7 +308,7 @@ class GunnerUnit extends TokenUnit {
         supplied = true
         if (this.supplyT <= 0) {
           this.supplyT = 0.12
-          this.combat.fx.tracer(eye, sp.pos.clone(), this.team === 'blue' ? 0x6ec8ff : 0xff8a78)
+          if (!this.world.headless) this.combat.fx.tracer(eye, sp.pos.clone(), this.team === 'blue' ? 0x6ec8ff : 0xff8a78)
         }
         if (!this.target) this.faceDir(sp.pos.clone().sub(this.group.position).setY(0).normalize(), dt)
       } else if (d > 11) {
@@ -443,7 +443,7 @@ class HealDroneUnit extends TokenUnit {
         sp.supply(this.team, 0.03 / n, dt)
         if (this.supplyT <= 0) {
           this.supplyT = 0.14
-          this.combat.fx.tracer(eye, sp.pos.clone(), this.team === 'blue' ? 0x8effd0 : 0xffb0a0)
+          if (!this.world.headless) this.combat.fx.tracer(eye, sp.pos.clone(), this.team === 'blue' ? 0x8effd0 : 0xffb0a0)
         }
       }
     } else {
@@ -462,9 +462,11 @@ class HealDroneUnit extends TokenUnit {
       if (inj) {
         this.healT = 0.4
         inj.hp = Math.min(inj.maxHp, inj.hp + 6 * 0.4)
-        const c = inj.group.position.clone()
-        c.y += inj.height * 0.6
-        this.combat.fx.tracer(p.clone(), c, 0x6effa8)
+        if (!this.world.headless) {
+          const c = inj.group.position.clone()
+          c.y += inj.height * 0.6
+          this.combat.fx.tracer(p.clone(), c, 0x6effa8)
+        }
       }
     }
     this.group.rotation.y += dt * 1.5

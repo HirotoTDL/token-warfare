@@ -24,10 +24,20 @@ export interface SimResult {
   scoreB: number
   dmgA: number
   dmgB: number
+  /** 占領モードが実際に駆動したかの診断(検証用。バランス集計では未使用) */
+  diag?: {
+    peakCenterAbs: number // 中央スフィアが押された最大の|charge|
+    centerCapturedBy: ('blue' | 'red')[] // 中央を占領した側(順不同・重複あり=反転回数)
+    blueDominatedS: number // 青が「中央+敵陣」を確保していた累計秒
+    redDominatedS: number
+    peakUnits: number // 同時最大ユニット数(将2含む=トークン配備の活発さ)
+    flips: number // スフィア占有反転の総回数
+  }
 }
 
 export function simulateMatch(aKey: string, bKey: string, level = 6, matchTime = MATCH_TIME, mapKey = 'skyhaven'): SimResult {
   const world = new World()
+  world.headless = true // 装飾fx(供給ビーム等)を省いて高速化
   buildArena(world, mapKey, true) // lite: 装飾を省きコライダー/コア地点のみ(高速化)
   const sfx = new Sfx() // unlockしない=無音
   const fx = new Effects(world.scene)
@@ -66,6 +76,13 @@ export function simulateMatch(aKey: string, bKey: string, level = 6, matchTime =
   let coreT = 4
   let timer = matchTime
   const dt = 1 / 30
+  // --- 診断トラッカー(占領モードが実際に動いているかの計測) ---
+  let peakCenterAbs = 0
+  const centerCapturedBy: ('blue' | 'red')[] = []
+  let blueDominatedS = 0
+  let redDominatedS = 0
+  let peakUnits = 0
+  let flipCount = 0
 
   while (timer > 0) {
     timer -= dt
@@ -116,7 +133,16 @@ export function simulateMatch(aKey: string, bKey: string, level = 6, matchTime =
     for (const u of [...world.units]) u.update(dt)
     combat.update(dt)
     fx.update(dt)
-    objectives.update(dt)
+    const step = objectives.update(dt)
+    // --- 診断計測 ---
+    peakCenterAbs = Math.max(peakCenterAbs, Math.abs(objectives.center.charge))
+    for (const f of step.flips) {
+      flipCount++
+      if (f.id === 'center') centerCapturedBy.push(f.owner)
+    }
+    if (objectives.dominating('blue')) blueDominatedS += dt
+    if (objectives.dominating('red')) redDominatedS += dt
+    if (world.units.length > peakUnits) peakUnits = world.units.length
     world.revealT.blue = Math.max(0, world.revealT.blue - dt)
     world.revealT.red = Math.max(0, world.revealT.red - dt)
     if (objectives.winner) break // 30カウント到達=ノックアウト
@@ -135,7 +161,19 @@ export function simulateMatch(aKey: string, bKey: string, level = 6, matchTime =
 
   // 占領モード: スコア=占領カウント(キル数dmgは参考スタット)
   void scores
-  return { a: aKey, b: bKey, scoreA: Math.floor(objectives.count.blue), scoreB: Math.floor(objectives.count.red), dmgA: Math.round(dmg.blue), dmgB: Math.round(dmg.red) }
+  return {
+    a: aKey, b: bKey,
+    scoreA: Math.floor(objectives.count.blue), scoreB: Math.floor(objectives.count.red),
+    dmgA: Math.round(dmg.blue), dmgB: Math.round(dmg.red),
+    diag: {
+      peakCenterAbs: +peakCenterAbs.toFixed(3),
+      centerCapturedBy,
+      blueDominatedS: +blueDominatedS.toFixed(1),
+      redDominatedS: +redDominatedS.toFixed(1),
+      peakUnits,
+      flips: flipCount,
+    },
+  }
 }
 
 /** 全キャラ総当たり(片側ずつ)。重いのでawaitしながら回す */
