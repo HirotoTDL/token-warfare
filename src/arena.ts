@@ -724,7 +724,8 @@ export function buildArena(world: World, mapKey = 'skyhaven', lite = false) {
       new THREE.CylinderGeometry(5.5, 5.8, 0.3, 28),
       new THREE.MeshStandardMaterial({ color: 0x4a525e, roughness: 0.6, metalness: 0.4 }),
     )
-    pad.position.set(bp.x, 0.15, bp.z)
+    // 上面をy=0(プレイヤーの物理接地面)に揃える。上面がy>0だとスポーン時に体/カメラがパッドにめり込む
+    pad.position.set(bp.x, -0.15, bp.z)
     pad.receiveShadow = true
     scene.add(pad)
     {
@@ -736,7 +737,11 @@ export function buildArena(world: World, mapKey = 'skyhaven', lite = false) {
         pdone = true
         const bb = new THREE.Box3().setFromObject(g)
         g.scale.multiplyScalar(11 / Math.max(0.3, bb.max.x - bb.min.x)) // 直径≈11へ
-        g.position.set(bp.x, -0.02, bp.z)
+        // スケール後の上面をy≈0へ。装飾パッドはコライダーを持たず、プレイヤーはy=0で接地するため、
+        // 上面が0より高いとスポーン直後に床へめり込む(GLBが厚いほど顕著)。上面を接地面に一致させる。
+        g.updateMatrixWorld(true)
+        const bb2 = new THREE.Box3().setFromObject(g)
+        g.position.set(bp.x, -bb2.max.y, bp.z)
         g.traverse((o) => { const m = o as THREE.Mesh; if (m.isMesh) { m.castShadow = true; m.receiveShadow = true } })
         scene.add(g); pad.visible = false
       }

@@ -114,6 +114,9 @@ class MenuView implements View {
   private pedestals: THREE.Mesh[] = []
   private fieldFog: THREE.Fog | null = null // 通常時のフォグを退避(ショーケースで濃霧に差し替え)
   private fieldBg: THREE.Color | THREE.Texture | null = null
+  // --- キャラ選択ショーケース: フィールドから完全分離した「スタジオ」背景 ---
+  private studio: THREE.Group | null = null // グラデ天球＋床グロー(showcaseの専用背景)
+  private hiddenForShowcase: THREE.Object3D[] = [] // showcase中に隠したアリーナ要素(復帰用)
 
   constructor() {
     this.arena = buildArena(this.world)
@@ -141,20 +144,54 @@ class MenuView implements View {
     })
   }
 
+  /** ショーケース専用の「スタジオ」背景(グラデ天球＋床グロー)。フィールドと完全に切り離す */
+  private buildStudio() {
+    const g = new THREE.Group()
+    // グラデ天球(妖精パレット: 下=深い藍 → 上=柔らかな菫)。fog:falseで遠方でも沈まない
+    const domeMat = new THREE.ShaderMaterial({
+      side: THREE.BackSide, depthWrite: false, fog: false,
+      uniforms: { cT: { value: new THREE.Color(0x4a3c84) }, cB: { value: new THREE.Color(0x0c0a1a) } },
+      vertexShader: 'varying float vy; void main(){ vy = normalize(position).y; gl_Position = projectionMatrix * modelViewMatrix * vec4(position,1.0); }',
+      fragmentShader: 'varying float vy; uniform vec3 cT; uniform vec3 cB; void main(){ float h = clamp(vy*0.5+0.5,0.0,1.0); gl_FragColor = vec4(mix(cB,cT,pow(h,0.7)),1.0); }',
+    })
+    const dome = new THREE.Mesh(new THREE.SphereGeometry(90, 24, 16), domeMat)
+    g.add(dome)
+    // 浮遊キャラ真下のソフトグロー(接地感のある光円)
+    const floorMat = new THREE.MeshBasicMaterial({ color: 0x7a6cff, transparent: true, opacity: 0.4, blending: THREE.AdditiveBlending, depthWrite: false })
+    const floor = new THREE.Mesh(new THREE.CircleGeometry(3.6, 48), floorMat)
+    floor.rotation.x = -Math.PI / 2
+    floor.position.set(0, 0.02, 11)
+    g.add(floor)
+    g.visible = false
+    this.world.scene.add(g)
+    this.studio = g
+  }
+
   setShowcase(on: boolean) {
     this.showcase = on
     const sc = this.world.scene
     if (on) {
       this.refreshGlbModels()
-      // フィールドから切り離す: 濃い霧＋クリアな背景でアリーナを覆い隠し、選択キャラだけを浮遊表示
+      if (!this.studio) this.buildStudio()
       if (!this.fieldFog) this.fieldFog = sc.fog as THREE.Fog
       if (this.fieldBg === null) this.fieldBg = sc.background as THREE.Color | THREE.Texture
-      const bg = new THREE.Color(0x171428)
-      sc.background = bg
-      sc.fog = new THREE.Fog(0x171428, 5, 17)
-      for (const p of this.pedestals) p.visible = false
+      // フィールドを完全に切り離す: アリーナ要素(モンスター/ライト/スタジオ背景以外)を全て非表示にし、
+      // 専用のスタジオ背景だけを見せる。霧で隠す旧方式と違い、床や構造物が一切映り込まない。
+      this.hiddenForShowcase = []
+      for (const o of sc.children) {
+        if (o === this.studio) continue
+        if (this.monsters.includes(o as THREE.Group)) continue
+        if ((o as THREE.Light).isLight) continue
+        if (o.visible) { this.hiddenForShowcase.push(o); o.visible = false }
+      }
+      this.studio!.visible = true
+      sc.fog = null
+      sc.background = new THREE.Color(0x110d20)
     } else {
       this.focusIdx = null
+      for (const o of this.hiddenForShowcase) o.visible = true
+      this.hiddenForShowcase = []
+      if (this.studio) this.studio.visible = false
       if (this.fieldFog) sc.fog = this.fieldFog
       if (this.fieldBg !== null) sc.background = this.fieldBg
       for (const p of this.pedestals) p.visible = true
@@ -227,14 +264,17 @@ class MenuView implements View {
       const s = m.scale.x + (ts - m.scale.x) * k
       m.scale.setScalar(s)
       // 向き: 選択画面ではカメラ側(正面)を向かせる(モデル正面が-Zのため+π)。
-      // 注目中はゆったり見回し、それ以外は控えめスウェイ。
+      // 注目中は穏やかに体を見せる程度のスウェイ、それ以外は控えめ。
       const faceBase = this.showcase ? Math.PI : 0
-      m.rotation.y = faceBase + (focused ? Math.sin(this.t * 0.7) * 0.35 : Math.sin(this.t * 1.6 + i * 1.3) * 0.06)
-      m.rotation.z = focused ? 0 : Math.sin(this.t * 2 + i) * 0.015
-      // モーション: リグ済みは関節アニメ、無リグは体アニメ。注目中は活発に動かす
-      const amp = focused ? 0.55 : this.showcase ? 0.1 : 0.14
-      if (m.userData.bones) animateSkeleton(m, this.t * 2.2 + i, amp)
-      else animateGlbBody(m, this.t * 2.0 + i, amp)
+      m.rotation.y = faceBase + (focused ? Math.sin(this.t * 0.6) * 0.18 : Math.sin(this.t * 1.6 + i * 1.3) * 0.06)
+      m.rotation.z = focused ? Math.sin(this.t * 0.9) * 0.02 : Math.sin(this.t * 2 + i) * 0.015
+      // モーション: リグ済みは関節アニメ、無リグは体アニメ。
+      // 注目中は「浮遊して静止」なので歩行サイクルを回さず、呼吸/首ゆれ中心の静かなアイドルにする
+      // (amp高だと空中で足踏みして見える=旧0.55の破綻を是正)。amp依存しないidle成分が生命感を担う。
+      const amp = focused ? 0.07 : this.showcase ? 0.1 : 0.14
+      const rate = focused ? 1.1 : this.showcase ? 2.0 : 2.0
+      if (m.userData.bones) animateSkeleton(m, this.t * rate + i, amp)
+      else animateGlbBody(m, this.t * rate + i, amp)
     })
 
     if (this.showcase) {
