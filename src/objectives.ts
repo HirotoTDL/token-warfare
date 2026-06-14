@@ -5,10 +5,12 @@ import { TEAM_COLOR, type Team } from './types'
 // 中央＋敵陣を確保している間カウントが進み、CAPTURE_TO_WIN で勝利。
 export type SphereId = 'center' | 'blueBase' | 'redBase'
 
-export const CAP_THRESHOLD = 0.95 // |charge|がこれ以上で「占領済み(その色)」
-export const CAPTURE_PER_DAMAGE = 1 / 150 // 与ダメ1あたりのcharge変化(150ネットで0→満タン)
-export const CAPTURE_TO_WIN = 30 // 勝利カウント(両拠点保持の累計秒)
+// リサーチ(ゾーン制圧FPS先行事例)に基づく値:
+export const CAP_THRESHOLD = 0.55 // |charge|がこれ以上で占領。±0.55未満は「無色=係争帯」を残す(Overwatch/Halo KOTH)
+export const CAPTURE_PER_DAMAGE = 0.012 // 与ダメ1あたりのcharge変化(将単独で中央0→0.55を約4〜5秒射撃で確保。瞬間占領を防ぐバッファ)
+export const CAPTURE_TO_WIN = 30 // 勝利カウント
 export const SPHERE_RADIUS = 1.6 // 当たり判定/見た目半径
+export const CONTEST_WINDOW = 0.5 // 直近この秒数に両軍から被弾していれば「係争中」
 
 export class Sphere {
   charge: number
@@ -21,6 +23,8 @@ export class Sphere {
   private mat: THREE.MeshStandardMaterial
   private ringMat: THREE.MeshBasicMaterial
   private t = 0
+  private hitBlue = 99 // 直近で青/赤に撃たれてからの経過秒(係争判定用)
+  private hitRed = 99
 
   constructor(id: SphereId, pos: THREE.Vector3, initialCharge: number, home: Team | null) {
     this.id = id
@@ -50,6 +54,13 @@ export class Sphere {
   damage(team: Team, amount: number) {
     this.charge += (team === 'blue' ? 1 : -1) * amount * CAPTURE_PER_DAMAGE
     this.charge = Math.max(-1, Math.min(1, this.charge))
+    if (team === 'blue') this.hitBlue = 0
+    else this.hitRed = 0
+  }
+
+  /** 両軍から直近に撃たれている=係争中(占領が拮抗。相殺で動きが止まる) */
+  contested(): boolean {
+    return this.hitBlue < CONTEST_WINDOW && this.hitRed < CONTEST_WINDOW
   }
 
   private colorFor(): THREE.Color {
@@ -70,12 +81,21 @@ export class Sphere {
 
   update(dt: number) {
     this.t += dt
+    this.hitBlue += dt
+    this.hitRed += dt
     this.core.rotation.y += dt * 0.5
     this.core.position.y = Math.sin(this.t * 1.2) * 0.18
     const owned = this.owner() !== null
+    const contested = this.contested()
     this.mat.emissiveIntensity = owned ? 0.9 + Math.sin(this.t * 3) * 0.25 : 0.5
     this.ring.scale.setScalar(owned ? 1 + Math.sin(this.t * 4) * 0.05 : 1)
     this.applyVisual()
+    // 係争中は白く明滅して「拮抗(占領が止まっている)」を伝える
+    if (contested) {
+      const f = 0.5 + Math.sin(this.t * 16) * 0.5
+      this.mat.emissive.lerp(new THREE.Color(0xffffff), f * 0.7)
+      this.ringMat.color.lerp(new THREE.Color(0xffffff), f)
+    }
   }
 }
 

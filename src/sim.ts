@@ -4,6 +4,7 @@ import { Effects, Combat } from './combat'
 import { Sfx } from './sfx'
 import { buildArena } from './arena'
 import { BotCommander, botParams } from './bot'
+import { Objectives } from './objectives'
 import {
   CHARACTERS, characterByKey,
   MATCH_TIME, OVERTIME_AT, RESPAWN_TIME, RESPAWN_INVULN,
@@ -35,6 +36,10 @@ export function simulateMatch(aKey: string, bKey: string, level = 6, matchTime =
   const botB = new BotCommander(world, combat, sfx, characterByKey(bKey), world.basePos.red.clone(), botParams(level), 'red')
   world.addUnit(botA)
   world.addUnit(botB)
+
+  // ゾーン制圧目標(占領モードの計測)
+  const objectives = new Objectives(world.scene, new THREE.Vector3(0, 3, 0), world.basePos)
+  world.objectives = objectives
 
   const scores: Record<Team, number> = { blue: 0, red: 0 }
   const dmg: Record<Team, number> = { blue: 0, red: 0 }
@@ -111,8 +116,10 @@ export function simulateMatch(aKey: string, bKey: string, level = 6, matchTime =
     for (const u of [...world.units]) u.update(dt)
     combat.update(dt)
     fx.update(dt)
+    objectives.update(dt)
     world.revealT.blue = Math.max(0, world.revealT.blue - dt)
     world.revealT.red = Math.max(0, world.revealT.red - dt)
+    if (objectives.winner) break // 30カウント到達=ノックアウト
   }
 
   // 後始末(GPU未使用だがジオメトリは解放)
@@ -126,7 +133,9 @@ export function simulateMatch(aKey: string, bKey: string, level = 6, matchTime =
     }
   })
 
-  return { a: aKey, b: bKey, scoreA: scores.blue, scoreB: scores.red, dmgA: Math.round(dmg.blue), dmgB: Math.round(dmg.red) }
+  // 占領モード: スコア=占領カウント(キル数dmgは参考スタット)
+  void scores
+  return { a: aKey, b: bKey, scoreA: Math.floor(objectives.count.blue), scoreB: Math.floor(objectives.count.red), dmgA: Math.round(dmg.blue), dmgB: Math.round(dmg.red) }
 }
 
 /** 全キャラ総当たり(片側ずつ)。重いのでawaitしながら回す */

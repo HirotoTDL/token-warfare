@@ -602,7 +602,7 @@ class BattleView implements View {
             affordable: this.player.tp >= TOKENS[k].cost,
           })),
           spheres: this.objectives.spheres.map((sp) => ({
-            id: sp.id, owner: sp.owner(), contested: Math.abs(sp.charge) > 0.05 && sp.owner() === null,
+            id: sp.id, owner: sp.owner(), contested: sp.contested(),
           })),
           countGoal: CAPTURE_TO_WIN,
         },
