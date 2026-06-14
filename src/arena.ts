@@ -425,8 +425,9 @@ export function buildArena(world: World, mapKey = 'skyhaven', lite = false) {
     crate(24, 12, 1.8); crate(-24, -12, 1.8)
     crate(14, -22, 2.0); crate(-14, 22, 2.0)
     crate(15.6, 4.4, 1.1); crate(-15.6, -4.4, 1.1)
-    // コーナーバリケード+バレル
+    // コーナーバリケード+バレル(4隅を点対称に=開けた対角の長射線を分断/カバー量を他Map並みに field-05)
     wall(27, 22, 6, 0.9, 2.2); wall(-27, -22, 6, 0.9, 2.2)
+    wall(27, -22, 6, 0.9, 2.2); wall(-27, 22, 6, 0.9, 2.2)
     barrel(12, 12); barrel(-12, -12); barrel(0, 20); barrel(0, -20)
     world.coreSpots = [
       new THREE.Vector3(0, 0, 15), new THREE.Vector3(0, 0, -15),
