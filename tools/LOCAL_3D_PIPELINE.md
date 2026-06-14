@@ -83,6 +83,26 @@ blender --background --python tools/bl_reshape.py -- stage/X_dec.glb stage/X_chi
 ```
 用途: 体型バリエ（チビ/スリム/マッチョ）、頭身調整、「足が長すぎる」等の比率微修正。
 
+## 5b. 商業レベル構造物ビルダー `bl_structures.py`（本命）
+
+kind引数で構造物を切替生成する汎用ビルダー。pillar/canopy/gate/railing/island/brazier/obelisk を実装済み。
+プリミティブ＋bevel＋既存/発注テクスチャの**BOX投影タイル貼り**(UV展開不要)で作る。
+```
+blender --background --python tools/bl_structures.py -- <kind> stage/struct_<kind>.glb stage/<kind>.png
+npx @gltf-transform/cli optimize stage/struct_<kind>.glb public/models/struct_<kind>.glb --texture-compress webp --texture-size 512 --compress meshopt
+```
+- `tex_mat(name,tex,scale,rough,metal,emit_from_tex)`: BOX投影でタイル。`emit_from_tex>0`でテクスチャ明部(発光ルーン等)を自発光。
+- **円柱はBOX投影だと模様が横に滲む** → タイルscaleを上げる(柱は3.0)と縦縞/フルート感が出る。平面が多い形状(4角オベリスク)はscale 1.0でOK。
+- ゲーム配置: `MODEL_MANIFEST`登録→`craftedSwap`(高所はbaseY指定)で手続きメッシュの視覚を差し替え(コライダー維持)、または`placeDeco`(arena.ts)で装飾を遅延配置。
+
+### GPTテクスチャ発注フロー（Claude in Chrome）
+構造物専用テクスチャはChatGPTで発注([[token-warfare-texture-gpt-rule]])。要点:
+1. CLAUDE.mdの手順でブラウザ選択(hostname→HomePC、2台時はAskUserQuestion必須)。
+2. chatgpt.com→「画像を作成」モード。**コンポーザーをクリックしてから1〜2秒待って入力**(待たないと先頭文字が落ちる)。Enterで送らず**送信ボタンをクリック**。
+3. プロンプト型: 「テクスチャ画像を生成。シームレスにタイルできる正方形、真上から見た平面。<内容>。フェアリーテールのパステル世界観、写実的PBR。文字やロゴ無し、1枚のみ。」
+4. 生成(~40s)→ 画像の共有/DLアイコン→「ダウンロードする」(SNS共有はしない)→ `~/Downloads`。
+5. `PIL`で512pxに縮小して`public/art/tex_*.png`へ保存。
+
 ## 5. 構造物をゼロから生成 `bl_build_tower.py`（テンプレート）
 
 プリミティブ（円柱/円錐/トーラス/球/キューブ）＋ modifier（`BEVEL` でソフトに、array的な配置はforループ）で組み、
