@@ -301,6 +301,7 @@ class BattleView implements View {
   private coreSpawnT = 4
   private overtimeAnnounced = false
   private suddenDeath = false
+  private contestOT = false // 時間切れ後、係争継続で延長中
   private endTimer = -1
   private hitstopT = 0
   /** プレイヤー戦績 */
@@ -501,15 +502,25 @@ class BattleView implements View {
 
       this.timer -= dt
       if (this.timer <= 0) {
-        if (!this.suddenDeath && this.scores.blue === this.scores.red) {
+        this.timer = 0
+        // 係争中は決着させない(時間切れ直前の逆転ラッシュを成立させる。Overwatch/Splat Zones式)
+        const contested = this.objectives.spheres.some((s) => s.contested())
+        if (contested) {
+          if (!this.contestOT) {
+            this.contestOT = true
+            this.hud.warn('⏱ 延長戦 — 係争が続く限り決着しない!', 3)
+            sfx.overtime()
+            bgm.play('overtime')
+          }
+        } else if (!this.suddenDeath && this.scores.blue === this.scores.red) {
           // 同点ならサドンデス(45秒・先にリードした側が勝ち)
           this.suddenDeath = true
           this.timer = 45
+          this.contestOT = false
           this.hud.warn('🔥 サドンデス — 先にカウントを進めた方が勝ち!', 4)
           sfx.overtime()
           bgm.play('overtime')
         } else {
-          this.timer = 0
           this.finish()
         }
       }

@@ -25,6 +25,9 @@ export class Sphere {
   private t = 0
   private hitBlue = 99 // 直近で青/赤に撃たれてからの経過秒(係争判定用)
   private hitRed = 99
+  private lastOwner: Team | null = null // 占有変化検出用
+  private penaltyTeam: Team | null = null // 奪われた側(再奪取の供給-50%)
+  private penaltyT = 0
 
   constructor(id: SphereId, pos: THREE.Vector3, initialCharge: number, home: Team | null) {
     this.id = id
@@ -52,7 +55,10 @@ export class Sphere {
 
   /** team の攻撃で占領を進める(青=+/赤=−)。相殺は呼び出し側が同フレームで両軍分加算することで自然に起きる */
   damage(team: Team, amount: number) {
-    this.charge += (team === 'blue' ? 1 : -1) * amount * CAPTURE_PER_DAMAGE
+    // 逆転ペナルティ: 奪われた直後の側は、その球への供給が一時的に半減(即時取り返しを抑制)
+    let amt = amount
+    if (this.penaltyTeam === team && this.penaltyT > 0) amt *= 0.5
+    this.charge += (team === 'blue' ? 1 : -1) * amt * CAPTURE_PER_DAMAGE
     this.charge = Math.max(-1, Math.min(1, this.charge))
     if (team === 'blue') this.hitBlue = 0
     else this.hitRed = 0
@@ -83,6 +89,15 @@ export class Sphere {
     this.t += dt
     this.hitBlue += dt
     this.hitRed += dt
+    this.penaltyT = Math.max(0, this.penaltyT - dt)
+    // 占有が反転したら「奪われた側」に再奪取ペナルティ(3秒・供給半減)
+    const own = this.owner()
+    if (own && own !== this.lastOwner) {
+      if (this.lastOwner) { this.penaltyTeam = this.lastOwner; this.penaltyT = 3 }
+      this.lastOwner = own
+    } else if (own) {
+      this.lastOwner = own
+    }
     this.core.rotation.y += dt * 0.5
     this.core.position.y = Math.sin(this.t * 1.2) * 0.18
     const owned = this.owner() !== null
