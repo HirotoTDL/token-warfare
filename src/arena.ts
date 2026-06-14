@@ -121,7 +121,9 @@ export const MAPS: MapInfo[] = [
   { key: 'crystalsprings', name: 'クリスタルスプリング', desc: '妖精の泉。中央クリスタルと対角の遮蔽。開けた撃ち合い' },
 ]
 
-export function buildArena(world: World, mapKey = 'skyhaven') {
+// lite=true: 装飾(散布物/遠景/プロップ/ランドマーク等)を省き、コライダーとコア地点のみ構築する。
+// バランス検証のヘッドレス高速シミュ用(見た目は不要なので生成/破棄コストを大幅削減)。
+export function buildArena(world: World, mapKey = 'skyhaven', lite = false) {
   const scene = world.scene
   const half = world.arenaHalf
   const updates: ((dt: number, t: number) => void)[] = []
@@ -173,7 +175,7 @@ export function buildArena(world: World, mapKey = 'skyhaven') {
 
   // --- 境界の曖昧化: 硬い壁を廃し、散在する草叢・花・小岩で縁をぼかす ---
   // プレイ縁(half)を「線」として見せず、外側へ不規則に植生を散らして大地に溶かす。
-  {
+  if (!lite) {
     // 自作の散布物GLB(草/花/キノコ/小石)を縁に撒いて大地に溶かす。配置計画を先に作り、
     // モデルが揃い次第まとめてクローン配置(個別スケール・ランダム回転)。
     type Scat = { key: string; x: number; z: number; s: number; ry: number }
@@ -565,6 +567,7 @@ export function buildArena(world: World, mapKey = 'skyhaven') {
     })
     emblemAt(0, DECK + 1.0, 0)
 
+    if (!lite) {
     // --- フェアリィ・プロップ作り込み(Codex生成テクスチャを活用) ---
     {
       const texMat = (name: string, opt: THREE.MeshStandardMaterialParameters = {}) => {
@@ -701,6 +704,7 @@ export function buildArena(world: World, mapKey = 'skyhaven') {
       placeProp('prop_flowercart', 23, 21, 1.0, 2.4)
       placeProp('prop_flowercart', -23, -21, 1.0, 0.6)
     }
+    }
 
     // コア出現スポット(地上+高所デッキで縦の駆け引き)
     world.coreSpots = [
@@ -777,6 +781,7 @@ export function buildArena(world: World, mapKey = 'skyhaven') {
   }
 
   // --- ランプポスト(作り込みのprop_lamp。色付き点光源で陣営/ネオンの彩り) ---
+  if (!lite) {
   const poleMat = new THREE.MeshStandardMaterial({ color: 0x39414e, roughness: 0.6, metalness: 0.5 })
   let lampIdx = 0
   for (const [lx, lz] of [[15, 15], [-15, 15], [15, -15], [-15, -15]] as const) {
@@ -810,6 +815,7 @@ export function buildArena(world: World, mapKey = 'skyhaven') {
     tryLamp()
     if (!ldone) updates.push(tryLamp)
   }
+  }
 
   // --- エナジーコア出現スポット(レイアウト側で未設定ならデフォルト) ---
   if (!world.coreSpots.length) {
@@ -820,6 +826,7 @@ export function buildArena(world: World, mapKey = 'skyhaven') {
       new THREE.Vector3(24, 0, -20), new THREE.Vector3(-24, 0, 20),
     ]
   }
+  if (!lite) {
   // スポットの目印(うっすら光る円)
   for (const sp of world.coreSpots) {
     const marker = new THREE.Mesh(
@@ -1030,6 +1037,7 @@ export function buildArena(world: World, mapKey = 'skyhaven') {
     for (const [bx, bz] of [[12, 0], [-12, 0], [0, 12], [0, -12]] as const) {
       placeDeco('struct_brazier', bx, 0, bz, 1.0, 0, false)
     }
+  }
   }
 
   return {

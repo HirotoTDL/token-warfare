@@ -27,7 +27,7 @@ export interface SimResult {
 
 export function simulateMatch(aKey: string, bKey: string, level = 6, matchTime = MATCH_TIME, mapKey = 'skyhaven'): SimResult {
   const world = new World()
-  buildArena(world, mapKey)
+  buildArena(world, mapKey, true) // lite: 装飾を省きコライダー/コア地点のみ(高速化)
   const sfx = new Sfx() // unlockしない=無音
   const fx = new Effects(world.scene)
   const combat = new Combat(world, fx, sfx)
