@@ -220,8 +220,8 @@ export function buildArena(world: World, mapKey = 'skyhaven') {
   // --- 障害物 ---
   const graffiti = graffitiTexture()
   const wallMat = new THREE.MeshStandardMaterial({ map: graffiti, roughness: 0.6, metalness: 0.2 })
-  // 壁・胸壁・屋根をフェアリィ世界観のクリスタルパネルに統一(旧パンク落書きを置換)
-  applyExtTexture(wallMat, 'tex_crate', [1, 1])
+  // 壁・胸壁・屋根を魔法石ブロックに(クレートのクリスタルパネルと差別化し砦感を出す)
+  applyExtTexture(wallMat, 'tex_magic_stone_blocks', [1.5, 1.5])
   let crateIdx = 0
 
   function solid(geo: THREE.BufferGeometry, mat: THREE.Material, cx: number, cy: number, cz: number, box: AABB, cover = true) {
@@ -275,6 +275,7 @@ export function buildArena(world: World, mapKey = 'skyhaven') {
     solid(barrelGeo, bIdx++ % 2 ? barrelMat : barrelMat2, bx, 0.575, bz, aabb(bx, bz, 1.0, 1.15, 1.0), false)
   }
   const pillarMat = new THREE.MeshStandardMaterial({ color: 0x8a94a2, roughness: 0.5, metalness: 0.45 })
+  applyExtTexture(pillarMat, 'tex_jewel_inlay_panel', [1, 2])
 
   // 回転エンブレム(両マップ共通の中央モチーフ)
   function emblemAt(x: number, y: number, z: number) {
