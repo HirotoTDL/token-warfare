@@ -51,7 +51,20 @@
 
   <div id="screen-select" class="screen hidden">
     <h2 class="select-heading">コマンダーを選択</h2>
-    <div id="char-cards"></div>
+    <div class="select-main">
+      <div class="char-preview" id="char-preview">
+        <div class="preview-glow"></div>
+        <img id="preview-img" src="" alt="" />
+        <div class="preview-tag">
+          <h3 id="preview-name"></h3>
+          <span id="preview-role"></span>
+          <p id="preview-title"></p>
+        </div>
+      </div>
+      <div class="char-details" id="char-details"></div>
+    </div>
+    <div class="char-roster" id="char-roster"></div>
+    <button id="btn-sortie" class="btn-main">出 撃</button>
   </div>
 
   <div id="screen-result" class="screen hidden">

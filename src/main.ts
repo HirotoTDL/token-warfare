@@ -10,7 +10,7 @@ import {
   CHARACTERS, TEAM_NAME, characterByKey,
   MATCH_TIME, OVERTIME_AT, RESPAWN_TIME, RESPAWN_TIME_OT, RESPAWN_INVULN,
   TP_MOMENTUM_MUL, CORE_TP, CORE_TP_MOMENTUM_BONUS, SMALL_CORE_TP,
-  type Team,
+  type Team, type CharacterDef,
 } from './types'
 import { PlayerCommander } from './player'
 import { BotCommander, botParams } from './bot'
@@ -667,42 +667,60 @@ for (let lv = 1; lv <= 10; lv++) {
   levelGrid.appendChild(b)
 }
 
-// キャラ選択カード生成(8人)
-const cardsRoot = document.getElementById('char-cards')!
-for (const c of CHARACTERS) {
-  const card = document.createElement('div')
-  card.className = `char-card ${c.key} ${c.gender}`
+// キャラ選択(ロスター＋大プレビュー＋詳細パネル＋出撃)
+const rosterRoot = document.getElementById('char-roster')!
+const previewWrap = document.getElementById('char-preview')!
+const previewImg = document.getElementById('preview-img') as HTMLImageElement
+const previewName = document.getElementById('preview-name')!
+const previewRole = document.getElementById('preview-role')!
+const previewTitle = document.getElementById('preview-title')!
+const detailsRoot = document.getElementById('char-details')!
+const rosterThumbs: HTMLElement[] = []
+let selectedChar = CHARACTERS[0]
+let selectedIdx = 0
+
+function selectCharacter(c: CharacterDef, idx: number) {
+  selectedChar = c
+  selectedIdx = idx
   const colorHex = `#${c.color.toString(16).padStart(6, '0')}`
-  card.innerHTML = `
-    <div class="char-portrait" style="--cc: ${colorHex}">
-      <img src="art/portrait_${c.key}.png" alt="${c.name}" loading="lazy" />
-    </div>
-    <div class="char-head" style="--cc: ${colorHex}">
-      <h3>${c.name}</h3>
-      <span class="char-role">${c.role}</span>
-    </div>
-    <p class="char-title">${c.title}</p>
-    <ul>
-      <li><b>HP</b> ${c.hp}</li>
-      <li><b>武器</b> ${c.weapon.name} — ${c.weapon.desc}</li>
-      <li><b>スキル</b> ${c.skill.name} — ${c.skill.desc}</li>
-      <li><b>固有</b> ${TOKENS[c.uniqueToken].name} — ${TOKENS[c.uniqueToken].desc}</li>
-    </ul>
-    <div class="card-cta">出撃</div>
+  // 大プレビュー(立ち絵差し替え。再生アニメで切替感)
+  previewWrap.style.setProperty('--cc', colorHex)
+  previewImg.classList.remove('swap')
+  void previewImg.offsetWidth
+  previewImg.src = `art/portrait_${c.key}.png`
+  previewImg.classList.add('swap')
+  previewName.textContent = c.name
+  previewRole.textContent = c.role
+  previewTitle.textContent = c.title
+  // 詳細パネル
+  detailsRoot.style.setProperty('--cc', colorHex)
+  detailsRoot.innerHTML = `
+    <div class="detail-hp"><span>HP</span><b>${c.hp}</b></div>
+    <div class="detail-block"><span class="dl">武器</span><b>${c.weapon.name}</b><p>${c.weapon.desc}</p></div>
+    <div class="detail-block"><span class="dl">スキル</span><b>${c.skill.name}</b><p>${c.skill.desc}</p></div>
+    <div class="detail-block"><span class="dl">固有トークン</span><b>${TOKENS[c.uniqueToken].name}</b><p>${TOKENS[c.uniqueToken].desc}</p></div>
   `
-  card.addEventListener('click', () => {
-    sfx.unlock()
-    startBattle(c.key)
-  })
-  const idx = CHARACTERS.indexOf(c)
-  card.addEventListener('mouseenter', () => {
-    if (view instanceof MenuView) view.focusChar(idx)
-  })
-  card.addEventListener('mouseleave', () => {
-    if (view instanceof MenuView) view.focusChar(null)
-  })
-  cardsRoot.appendChild(card)
+  // ロスターのハイライト＋3Dショーケースのフォーカス
+  rosterThumbs.forEach((t, i) => t.classList.toggle('sel', i === idx))
+  if (view instanceof MenuView) view.focusChar(idx)
 }
+
+CHARACTERS.forEach((c, idx) => {
+  const colorHex = `#${c.color.toString(16).padStart(6, '0')}`
+  const thumb = document.createElement('button')
+  thumb.className = `roster-thumb ${c.key} ${c.gender}`
+  thumb.style.setProperty('--cc', colorHex)
+  thumb.innerHTML = `<span class="rt-frame"><img src="art/portrait_${c.key}.png" alt="${c.name}" loading="lazy" /></span><span class="rt-name">${c.name}</span>`
+  thumb.addEventListener('click', () => { sfx.unlock(); selectCharacter(c, idx) })
+  thumb.addEventListener('dblclick', () => { sfx.unlock(); startBattle(c.key) })
+  thumb.addEventListener('mouseenter', () => { if (view instanceof MenuView) view.focusChar(idx) })
+  thumb.addEventListener('mouseleave', () => { if (view instanceof MenuView) view.focusChar(selectedIdx) })
+  rosterRoot.appendChild(thumb)
+  rosterThumbs.push(thumb)
+})
+
+document.getElementById('btn-sortie')!.addEventListener('click', () => { sfx.unlock(); startBattle(selectedChar.key) })
+selectCharacter(CHARACTERS[0], 0) // 初期選択
 
 document.getElementById('btn-start')!.addEventListener('click', () => {
   sfx.unlock()
