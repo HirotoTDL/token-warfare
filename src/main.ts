@@ -41,8 +41,10 @@ renderer.setPixelRatio(BASE_PR)
 renderer.setSize(window.innerWidth, window.innerHeight)
 renderer.shadowMap.enabled = true
 renderer.shadowMap.type = THREE.PCFSoftShadowMap
-renderer.toneMapping = THREE.ACESFilmicToneMapping
-renderer.toneMappingExposure = 0.98
+// ACESFilmicは広ガモット圧縮で鮮やかな色が灰がかる(washed-out)=スタイライズドが安っぽく見える主因。
+// Khronos PBR Neutralはガモット内で色相を保ったままハイライトを処理し、妖精/クリスタルの原色が映える。
+renderer.toneMapping = THREE.NeutralToneMapping
+renderer.toneMappingExposure = 1.0 // Neutralは暗部が締まるので0.98→1.0
 app.appendChild(renderer.domElement)
 
 const postfx = new PostFX(renderer)
@@ -131,7 +133,7 @@ class MenuView implements View {
     this.arena = buildArena(this.world)
     this.sky = createSky(this.world.scene, this.arena.sunDir)
     this.world.scene.environment = envTex
-    ;(this.world.scene as any).environmentIntensity = 0.18
+    ;(this.world.scene as any).environmentIntensity = 0.28 // IBL強化(0.18→0.28): 艶/金属部の映り込みでチープさ低減
     // ショーケース: 8人が一列に並ぶ(キャラ選択画面の背景)。GLBがあれば使い、無ければプロシージャル
     CHARACTERS.forEach((c, i) => {
       const glb = getModel(`char_${c.key}`, 'blue')
@@ -236,7 +238,9 @@ class MenuView implements View {
     this.t += dt
     this.world.time = this.t
     this.sky.update(this.t)
-    this.arena.update(dt, this.t)
+    // ショーケース中はアリーナを更新しない: 遅延配置されるGLB(浮遊島/塔等)が分離済みのスタジオ背景へ
+    // ポップインして映り込むのを防ぐ(背景はstudioのみ)。ショーケースを抜ければ配置は再開する。
+    if (!this.showcase) this.arena.update(dt, this.t)
 
     // 起動時に未ロードだったGLBが揃い次第、プロシージャル表示をフェアリィGLBへ差し替える
     // (タイトル/ホーム画面でも反映されるよう、全員GLBになるまで毎フレーム試行)
@@ -363,7 +367,7 @@ class BattleView implements View {
     this.arena = buildArena(this.world, config.mapKey)
     this.sky = createSky(this.world.scene, this.arena.sunDir, (this.arena as any).dusk ? SKY_DUSK : SKY_DAY)
     this.world.scene.environment = envTex
-    ;(this.world.scene as any).environmentIntensity = (this.arena as any).dusk ? 0.28 : 0.18
+    ;(this.world.scene as any).environmentIntensity = (this.arena as any).dusk ? 0.34 : 0.28
     this.fx = new Effects(this.world.scene)
     this.combat = new Combat(this.world, this.fx, sfx)
     this.popups = new DamagePopups(this.world.scene)

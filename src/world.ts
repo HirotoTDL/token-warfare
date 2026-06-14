@@ -243,6 +243,6 @@ export class World {
     this.ray.set(a, dir)
     this.ray.near = 0.01
     this.ray.far = dist - 0.15
-    return this.ray.intersectObjects(this.obstacleMeshes, false).length === 0
+    return this.ray.intersectObjects(this.obstacleMeshes, true).length === 0 // 再帰: GLB propのGroup配下Meshも遮蔽に含める
   }
 }

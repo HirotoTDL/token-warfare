@@ -553,7 +553,7 @@ export class PlayerCommander implements Unit {
     this.deployRay.set(origin.clone(), dir.clone())
     this.deployRay.near = 0.1
     this.deployRay.far = MAXD
-    const hits = this.deployRay.intersectObjects(this.world.obstacleMeshes, false)
+    const hits = this.deployRay.intersectObjects(this.world.obstacleMeshes, true) // 再帰: GLB prop配下Meshも配備レイの対象に
     const flatHit = hits.find((h) => h.point.y < 1.2 && (!h.face || h.face.normal.y > 0.6))
     const blockedDist = hits.length ? hits[0].distance : Infinity
 

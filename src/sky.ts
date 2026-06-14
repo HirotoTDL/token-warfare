@@ -70,7 +70,7 @@ export function createSky(scene: THREE.Scene, sunDir: THREE.Vector3, palette: Sk
         vec3 col = mix(horizon, zenith, pow(max(h, 0.0), 0.55));
         if (h < 0.0) col = mix(horizon, vec3(0.55, 0.65, 0.78), min(1.0, -h * 3.0));
         float sunD = max(dot(dir, normalize(uSunDir)), 0.0);
-        col += vec3(1.0, 0.92, 0.72) * pow(sunD, 700.0) * 6.0;
+        col += vec3(1.0, 0.92, 0.72) * pow(sunD, 1100.0) * 3.2;
         col += vec3(1.0, 0.85, 0.6) * pow(sunD, 8.0) * 0.22;
         if (h > 0.005) {
           vec2 uv = dir.xz / (dir.y + 0.18) * 1.5 + vec2(uTime * 0.009, uTime * 0.004);

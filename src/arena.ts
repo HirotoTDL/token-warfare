@@ -22,6 +22,7 @@ function applyExtTexture(
       tex.wrapS = tex.wrapT = THREE.RepeatWrapping
       tex.repeat.set(repeat[0], repeat[1])
       tex.colorSpace = THREE.SRGBColorSpace
+      tex.anisotropy = 8 // 高repeat床(最大86)の斜め視点モアレを抑制
       mat.map = tex
       mat.color.set(0xffffff)
       mat.needsUpdate = true
@@ -74,6 +75,7 @@ function groundTexture(): THREE.Texture {
   tex.wrapS = tex.wrapT = THREE.RepeatWrapping
   tex.repeat.set(10, 10)
   tex.colorSpace = THREE.SRGBColorSpace
+  tex.anisotropy = 8 // 浅い角度で見る床のモアレ/チラつきを抑制(既定1→8。GPU上限へ自動クランプ)
   return tex
 }
 
@@ -106,6 +108,7 @@ function graffitiTexture(): THREE.Texture {
   }
   const tex = new THREE.CanvasTexture(c)
   tex.colorSpace = THREE.SRGBColorSpace
+  tex.anisotropy = 8
   return tex
 }
 
@@ -148,6 +151,7 @@ export function buildArena(world: World, mapKey = 'skyhaven', lite = false) {
   sun.shadow.camera.near = 10
   sun.shadow.camera.far = 180
   sun.shadow.bias = -0.0004
+  sun.shadow.normalBias = 0.03 // スリム体型のセルフシャドウのアクネ(縞)を抑制
   scene.add(sun)
   scene.add(new THREE.HemisphereLight(crystal ? 0xd2f2ff : dusk ? 0x9a86c8 : 0xc8d8f5, crystal ? 0x9cc8e4 : dusk ? 0x55384a : 0x5a4a50, crystal ? 0.9 : dusk ? 0.75 : 0.8))
 
