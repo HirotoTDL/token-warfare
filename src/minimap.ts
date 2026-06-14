@@ -68,6 +68,36 @@ export class Minimap {
       ctx.restore()
     }
 
+    // スフィア占領状態(形で冗長符号化: 中央=ひし形/陣=円。色=占有(青/赤/無色グレー)。係争=白リング)
+    const obj = world.objectives
+    if (obj) {
+      for (const sp of obj.spheres) {
+        const x = this.toMap(sp.pos.x)
+        const y = this.toMap(sp.pos.z)
+        const own = sp.owner()
+        ctx.save()
+        ctx.translate(x, y)
+        ctx.fillStyle = own === 'blue' ? '#4db8ff' : own === 'red' ? '#ff6a5a' : '#bdbdbd'
+        if (sp.id === 'center') {
+          ctx.rotate(Math.PI / 4)
+          ctx.fillRect(-5, -5, 10, 10)
+        } else {
+          ctx.beginPath()
+          ctx.arc(0, 0, 5, 0, Math.PI * 2)
+          ctx.fill()
+        }
+        if (sp.contested()) {
+          ctx.rotate(-Math.PI / 4)
+          ctx.strokeStyle = '#ffffff'
+          ctx.lineWidth = 1.5 + Math.sin(time * 16) * 0.8
+          ctx.beginPath()
+          ctx.arc(0, 0, 9, 0, Math.PI * 2)
+          ctx.stroke()
+        }
+        ctx.restore()
+      }
+    }
+
     // ユニット(トークンは両軍とも表示。将は原則非表示)
     for (const u of world.units) {
       if (!u.alive) continue
