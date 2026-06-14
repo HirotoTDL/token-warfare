@@ -426,11 +426,32 @@ export function buildArena(world: World, mapKey = 'skyhaven') {
       solid(new THREE.BoxGeometry(w, topY, d), mat, cx, topY / 2, cz, aabb(cx, cz, w, topY, d))
     }
     // 高所の縁に置く胸壁(遮蔽)。baseYは床面の高さ。
+    // 箱コライダーは残し、視覚はバラストレード(struct_railing)を長さに合わせて伸縮配置して差し替える。
     const parapet = (cx: number, cz: number, w: number, d: number, baseY: number, h = 1.1) => {
-      solid(new THREE.BoxGeometry(w, h, d), wallMat, cx, baseY + h / 2, cz, {
+      const box = solid(new THREE.BoxGeometry(w, h, d), wallMat, cx, baseY + h / 2, cz, {
         min: new THREE.Vector3(cx - w / 2, baseY, cz - d / 2),
         max: new THREE.Vector3(cx + w / 2, baseY + h, cz + d / 2),
       }, false)
+      const alongX = w >= d
+      const length = alongX ? w : d
+      let done = false
+      const tryRail = () => {
+        if (done) return
+        const g = getScenery('struct_railing')
+        if (!g) return
+        done = true
+        box.visible = false
+        const bb = new THREE.Box3().setFromObject(g)
+        const sz = bb.getSize(new THREE.Vector3())
+        // ネイティブ(長さX≈2.4, 高さ1.2)を胸壁の寸法へ伸縮
+        g.scale.set(length / Math.max(0.3, sz.x), (h + 0.15) / Math.max(0.3, sz.y), 1)
+        g.position.set(cx, baseY, cz)
+        g.rotation.y = alongX ? 0 : Math.PI / 2
+        g.traverse((o) => { const m = o as THREE.Mesh; if (m.isMesh) { m.castShadow = true; m.receiveShadow = true } })
+        scene.add(g)
+      }
+      tryRail()
+      if (!done) updates.push(tryRail)
     }
 
     // --- 中央コマンドデッキ(高所拠点 top=2.4, 12x12)。中央を取ると有利、3方向から登れる ---

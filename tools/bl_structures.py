@@ -250,7 +250,48 @@ def build_canopy():
         add('primitive_ico_sphere_add', CRYST, radius=0.16, location=(4.3 * math.cos(ang), 4.3 * math.sin(ang), -0.45), subdivisions=2)
 
 
-BUILDERS = {'pillar': build_pillar, 'gate': build_gate, 'obelisk': build_obelisk, 'brazier': build_brazier, 'canopy': build_canopy}
+BAL_PROFILE = [(0, 0), (0.11, 0), (0.11, 0.04), (0.05, 0.12), (0.10, 0.22), (0.045, 0.34),
+               (0.08, 0.42), (0.04, 0.52), (0.075, 0.6), (0.03, 0.66), (0, 0.70)]
+
+
+def build_railing():
+    # バラストレード(欄干): 下台座 + 上レール+金トリム + 旋盤バラスター5本 + 両端親柱+フィニアル
+    seg = 2.4
+    add('primitive_cube_add', MARBLE, smooth=False, size=1.0, location=(0, 0, 0.08)); o = OBJS[-1]; o.scale = (seg / 2 + 0.12, 0.17, 0.08); bevel(o, 0.02, 2)
+    add('primitive_cube_add', MARBLE, smooth=False, size=1.0, location=(0, 0, 0.92)); o = OBJS[-1]; o.scale = (seg / 2 + 0.14, 0.15, 0.07); bevel(o, 0.02, 2)
+    add('primitive_cube_add', GOLD, smooth=False, size=1.0, location=(0, 0, 0.995)); OBJS[-1].scale = (seg / 2 + 0.14, 0.14, 0.012)
+    for i in range(5):
+        b = revolve([(p[0], p[1] + 0.16) for p in BAL_PROFILE], MARBLE, 24, "bal", 1)
+        b.location.x = (i - 2) * 0.46
+    for sx in (-1, 1):
+        p = revolve([(p[0] * 1.45, p[1] * 1.25 + 0.12) for p in BAL_PROFILE], MARBLE, 24, "post", 1)
+        p.location.x = sx * (seg / 2)
+        add('primitive_ico_sphere_add', GOLD, radius=0.085, location=(sx * (seg / 2), 0, 1.18), subdivisions=2)
+
+
+def build_island():
+    GRASS = tex_mat("grass", "tex_grass_flower_meadow.png", 2.4, 0.85)
+    FLOWER = solid_mat("flower", (1.0, 0.7, 0.85), 0.6, 0.0, emit=0.3)
+    # 上面の草地(縁が丸い円盤)
+    revolve([(0, 0.52), (2.7, 0.52), (3.0, 0.4), (2.95, 0.18), (2.5, 0.06), (0, 0.06)], GRASS, 40, "grass", 1)
+    # 下の岩塊(層状にすぼまる)
+    revolve([(0, 0.2), (2.5, 0.2), (2.3, -0.3), (2.4, -0.7), (1.7, -1.3), (1.85, -1.7),
+             (1.0, -2.6), (0.45, -3.4), (0, -3.9)], STONE, 32, "rock", 1)
+    # 露出クリスタル(下面から斜めに突出)
+    for k in range(6):
+        ang = k / 6 * math.tau
+        add('primitive_cone_add', CRYST, vertices=6, smooth=False, radius1=0.32, radius2=0,
+            depth=1.6, location=(1.5 * math.cos(ang), 1.5 * math.sin(ang), -1.9),
+            rotation=(math.radians(145 + 12 * (k % 3)), 0, ang))
+    add('primitive_ico_sphere_add', CRYST, radius=0.5, location=(0, 0, -3.7), subdivisions=2)
+    # 草地の上の小花
+    for k in range(14):
+        ang = k * 2.39; rr = (k % 5) * 0.5
+        add('primitive_ico_sphere_add', FLOWER, radius=0.1, location=(rr * math.cos(ang), rr * math.sin(ang), 0.56), subdivisions=1)
+
+
+BUILDERS = {'pillar': build_pillar, 'gate': build_gate, 'obelisk': build_obelisk, 'brazier': build_brazier,
+            'canopy': build_canopy, 'railing': build_railing, 'island': build_island}
 BUILDERS[kind]()
 
 bpy.ops.object.select_all(action='DESELECT')
