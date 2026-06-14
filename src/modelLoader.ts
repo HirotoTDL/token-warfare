@@ -200,6 +200,10 @@ export const MODEL_MANIFEST: { key: string; height: number }[] = [
   // ステージ装飾構造物(フェアリィ世界観)
   { key: 'struct_tower', height: 14 }, { key: 'struct_house', height: 6 },
   { key: 'struct_arch', height: 8 },
+  // フェアリィ3Dプロップ(手続きプロップの格上げ)
+  { key: 'prop_fountain', height: 2.6 }, { key: 'prop_chest', height: 1.0 },
+  { key: 'prop_mushroom', height: 2.2 }, { key: 'prop_lamp', height: 3.4 },
+  { key: 'prop_flowercart', height: 1.8 }, { key: 'prop_altar', height: 2.8 },
   // FP武器ビューモデル(高さ正規化はビューモデル側で再調整)
   { key: 'weapon_blaster', height: 0.4 },
 ]

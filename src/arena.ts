@@ -541,6 +541,42 @@ export function buildArena(world: World, mapKey = 'skyhaven') {
       }
     }
 
+    // --- フェアリィ3Dプロップ(Tripo生成。手続きプロップを格上げ。未ロード時は遅延配置) ---
+    {
+      const placeProp = (
+        key: string, x: number, z: number, sc: number, ry: number,
+        opt: { collide?: number; light?: number } = {},
+      ) => {
+        let done = false
+        const tryPlace = () => {
+          if (done) return
+          const g = getScenery(key)
+          if (!g) return
+          done = true
+          g.position.set(x, -0.05, z)
+          g.scale.multiplyScalar(sc)
+          g.rotation.y = ry
+          g.traverse((o) => { const m = o as THREE.Mesh; if (m.isMesh) { m.castShadow = true; m.receiveShadow = true } })
+          scene.add(g)
+          if (opt.collide) { world.addCollider(aabb(x, z, opt.collide, opt.collide, opt.collide)); world.obstacleMeshes.push(g as unknown as THREE.Mesh) }
+          if (opt.light) { const lt = new THREE.PointLight(opt.light, 7, 14, 2); lt.position.set(x, 3.0, z); scene.add(lt) }
+        }
+        tryPlace()
+        if (!done) updates.push(() => tryPlace())
+      }
+      placeProp('prop_altar', 0, 19, 1.0, 0)
+      placeProp('prop_fountain', 26, 10, 1.0, 0.4, { collide: 2.2 })
+      placeProp('prop_fountain', -26, -10, 1.0, -0.4, { collide: 2.2 })
+      placeProp('prop_lamp', 14, -14, 1.0, 0, { light: 0xffcf86 })
+      placeProp('prop_lamp', -14, 14, 1.0, 0, { light: 0xffcf86 })
+      placeProp('prop_mushroom', -20, -7, 1.1, 0.6)
+      placeProp('prop_mushroom', 20, 7, 1.0, -0.6)
+      placeProp('prop_chest', 10, 18, 1.0, 0.5, { collide: 1.1 })
+      placeProp('prop_chest', -10, -18, 1.0, 2.0, { collide: 1.1 })
+      placeProp('prop_flowercart', 23, 21, 1.0, 2.4)
+      placeProp('prop_flowercart', -23, -21, 1.0, 0.6)
+    }
+
     // コア出現スポット(地上+高所デッキで縦の駆け引き)
     world.coreSpots = [
       new THREE.Vector3(0, DECK, 0), new THREE.Vector3(16, 1.6, 2), new THREE.Vector3(-16, 1.6, 2),
