@@ -174,47 +174,41 @@ export function buildArena(world: World, mapKey = 'skyhaven') {
   // --- 境界の曖昧化: 硬い壁を廃し、散在する草叢・花・小岩で縁をぼかす ---
   // プレイ縁(half)を「線」として見せず、外側へ不規則に植生を散らして大地に溶かす。
   {
-    const tuftGeo = new THREE.ConeGeometry(0.6, 1.5, 5)
-    const bushGeo = new THREE.SphereGeometry(0.9, 7, 6)
-    const tuftMats = [0x8fe39a, 0xa7e8b0, 0x7fd6c0, 0x9be0a8].map(
-      (c) => new THREE.MeshStandardMaterial({ color: c, roughness: 0.95 }),
-    )
-    const flowerMats = [0xff9ec7, 0xc6a7ff, 0xfff1a8, 0xffffff, 0x9fe8ff].map(
-      (c) => new THREE.MeshStandardMaterial({ color: c, emissive: c, emissiveIntensity: 0.35, roughness: 0.6 }),
-    )
-    const rockMat2 = new THREE.MeshStandardMaterial({ color: 0x97a6b8, roughness: 0.95 })
+    // 自作の散布物GLB(草/花/キノコ/小石)を縁に撒いて大地に溶かす。配置計画を先に作り、
+    // モデルが揃い次第まとめてクローン配置(個別スケール・ランダム回転)。
+    type Scat = { key: string; x: number; z: number; s: number; ry: number }
+    const plan: Scat[] = []
     for (let i = 0; i < 150; i++) {
       const ang = Math.random() * Math.PI * 2
-      // プレイ縁付近を濃く、外へ向かって疎に(pow>1 で内側に偏らせる)
-      const rad = half - 2 + Math.pow(Math.random(), 1.7) * 120
+      const rad = half - 2 + Math.pow(Math.random(), 1.7) * 120 // 縁付近を濃く外へ疎に
       const x = Math.cos(ang) * rad
       const z = Math.sin(ang) * rad
       const s = 0.7 + Math.random() * 2.0
-      const tuft = new THREE.Mesh(tuftGeo, tuftMats[i % tuftMats.length])
-      tuft.scale.set(s, s * (1 + Math.random() * 1.2), s)
-      tuft.position.set(x, s * 0.75, z)
-      tuft.castShadow = true
-      scene.add(tuft)
-      if (i % 3 === 0) {
-        const bush = new THREE.Mesh(bushGeo, tuftMats[(i + 1) % tuftMats.length])
-        const bs = 0.8 + Math.random() * 1.6
-        bush.scale.set(bs, bs * 0.7, bs)
-        bush.position.set(x + (Math.random() - 0.5) * 2, bs * 0.5, z + (Math.random() - 0.5) * 2)
-        bush.castShadow = true
-        scene.add(bush)
-      }
-      if (i % 2 === 0) {
-        const fl = new THREE.Mesh(new THREE.SphereGeometry(0.16 * s, 6, 5), flowerMats[i % flowerMats.length])
-        fl.position.set(x + (Math.random() - 0.5) * 1.5, 0.22 * s, z + (Math.random() - 0.5) * 1.5)
-        scene.add(fl)
-      }
-      if (i % 5 === 0) {
-        const rk = new THREE.Mesh(new THREE.DodecahedronGeometry(0.5 + Math.random()), rockMat2)
-        rk.position.set(x + (Math.random() - 0.5) * 3, 0.3, z + (Math.random() - 0.5) * 3)
-        rk.rotation.set(Math.random(), Math.random(), Math.random())
-        scene.add(rk)
+      plan.push({ key: 'scatter_grass', x, z, s, ry: Math.random() * 6.28 })
+      if (i % 3 === 0) plan.push({ key: 'scatter_mushroom', x: x + (Math.random() - 0.5) * 2, z: z + (Math.random() - 0.5) * 2, s: 0.8 + Math.random() * 1.6, ry: Math.random() * 6.28 })
+      if (i % 2 === 0) plan.push({ key: 'scatter_flowers', x: x + (Math.random() - 0.5) * 1.5, z: z + (Math.random() - 0.5) * 1.5, s: 0.7 + Math.random() * 1.3, ry: Math.random() * 6.28 })
+      if (i % 5 === 0) plan.push({ key: 'scatter_rock', x: x + (Math.random() - 0.5) * 3, z: z + (Math.random() - 0.5) * 3, s: 0.7 + Math.random() * 1.4, ry: Math.random() * 6.28 })
+    }
+    let scatterDone = false
+    const placeScatter = () => {
+      if (scatterDone) return
+      // 4種すべて読込完了を待ってから一括配置
+      if (!getScenery('scatter_grass') || !getScenery('scatter_flowers') || !getScenery('scatter_mushroom') || !getScenery('scatter_rock')) return
+      scatterDone = true
+      for (const p of plan) {
+        const g = getScenery(p.key)
+        if (!g) continue
+        const bb = new THREE.Box3().setFromObject(g)
+        const hNow = bb.max.y - bb.min.y
+        g.scale.setScalar((p.s) / Math.max(0.3, hNow))
+        g.position.set(p.x, -0.05, p.z)
+        g.rotation.y = p.ry
+        g.traverse((o) => { const m = o as THREE.Mesh; if (m.isMesh) m.castShadow = true })
+        scene.add(g)
       }
     }
+    placeScatter()
+    if (!scatterDone) updates.push(placeScatter)
   }
 
   // --- 障害物 ---

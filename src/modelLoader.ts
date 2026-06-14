@@ -209,6 +209,9 @@ export const MODEL_MANIFEST: { key: string; height: number }[] = [
   { key: 'struct_fairytower', height: 12 },
   // 遠景の自作の丘(フォグ背景)
   { key: 'struct_hill', height: 1 },
+  // 地表の散布物(自作の草/花/キノコ/小石。配置時に個別スケール)
+  { key: 'scatter_grass', height: 1 }, { key: 'scatter_flowers', height: 1 },
+  { key: 'scatter_mushroom', height: 1 }, { key: 'scatter_rock', height: 1 },
   // フェアリィ3Dプロップ(手続きプロップの格上げ)
   { key: 'prop_fountain', height: 2.6 }, { key: 'prop_chest', height: 1.0 },
   { key: 'prop_mushroom', height: 2.2 }, { key: 'prop_lamp', height: 3.4 },

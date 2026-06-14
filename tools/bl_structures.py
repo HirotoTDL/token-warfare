@@ -1,6 +1,7 @@
 # 商業レベル構造物ビルダー(headless) — 旋盤回転体(Screw)による繰形・フルート彫り・装飾リング・
 # サブサーフ・ヴーソワール等で本格的に作り込む。kind引数で種別切替。既存/発注GPTテクスチャをBOX投影。
-import bpy, math, mathutils, sys, os
+import bpy, math, mathutils, sys, os, random
+random.seed(7)
 a = sys.argv[sys.argv.index("--") + 1:]
 kind, out, render = a[0], a[1], a[2]
 ART = os.path.abspath("public/art")
@@ -357,6 +358,70 @@ def build_fairytower():
                 add('primitive_ico_sphere_add', FLW, smooth=True, radius=0.06, location=((rr + 0.05) * math.cos(ang), (rr + 0.05) * math.sin(ang), z), subdivisions=1)
 
 
+def build_grass():
+    # 草叢: 湾曲した細い葉を扇状に。2色の緑で自然に。
+    GA = solid_mat("ga", (0.42, 0.76, 0.40), 0.9); GB = solid_mat("gb", (0.55, 0.84, 0.48), 0.9)
+    for k in range(11):
+        ang = random.uniform(0, math.tau); lean = random.uniform(0.1, 0.45); h = random.uniform(0.6, 1.15)
+        r = random.uniform(0, 0.18)
+        add('primitive_cone_add', GA if k % 2 else GB, smooth=True, vertices=4, radius1=0.05, radius2=0.0, depth=h,
+            location=(r * math.cos(ang) + math.sin(lean) * math.cos(ang) * h * 0.4, r * math.sin(ang) + math.sin(lean) * math.sin(ang) * h * 0.4, h * 0.5 * math.cos(lean)),
+            rotation=(lean * math.cos(ang + math.pi / 2), lean * math.sin(ang + math.pi / 2), 0))
+
+
+def build_flowers():
+    # 花の茂み: 緑の葉数枚 + 茎付きの花3-4輪(パステル発光)
+    GA = solid_mat("ga", (0.45, 0.78, 0.42), 0.9)
+    STEM = solid_mat("stem", (0.5, 0.72, 0.4), 0.85)
+    cols = [(1.0, 0.62, 0.8), (0.78, 0.66, 1.0), (1.0, 0.95, 0.6), (0.62, 0.9, 1.0)]
+    for k in range(6):
+        ang = random.uniform(0, math.tau); h = random.uniform(0.4, 0.9)
+        add('primitive_cone_add', GA, smooth=True, vertices=4, radius1=0.045, radius2=0, depth=h, location=(random.uniform(0, 0.15) * math.cos(ang), random.uniform(0, 0.15) * math.sin(ang), h * 0.5), rotation=(random.uniform(0.1, 0.4) * math.cos(ang), random.uniform(0.1, 0.4) * math.sin(ang), 0))
+    for k in range(4):
+        ang = k / 4 * math.tau + random.uniform(0, 1); rr = random.uniform(0.1, 0.3); fz = random.uniform(0.55, 0.95)
+        fx, fy = rr * math.cos(ang), rr * math.sin(ang)
+        add('primitive_cylinder_add', STEM, smooth=True, vertices=6, radius=0.025, depth=fz, location=(fx, fy, fz / 2))
+        col = cols[k % len(cols)]; FM = solid_mat(f"fl{k}", col, 0.5, 0.0, emit=0.6)
+        # 花びら(小球を放射)+中心
+        for p in range(5):
+            pa = p / 5 * math.tau
+            add('primitive_ico_sphere_add', FM, smooth=True, radius=0.07, location=(fx + 0.08 * math.cos(pa), fy + 0.08 * math.sin(pa), fz), subdivisions=1)
+        add('primitive_ico_sphere_add', solid_mat(f"fc{k}", (1, 0.9, 0.5), 0.4, 0.0, emit=0.8), smooth=True, radius=0.05, location=(fx, fy, fz + 0.02), subdivisions=1)
+
+
+def build_mushroom():
+    # キノコの群れ: 茎(クリーム)+傘(パステル+白斑) 3本
+    STEM = solid_mat("ms", (0.95, 0.92, 0.85), 0.7)
+    caps = [(1.0, 0.6, 0.72), (0.66, 0.82, 1.0), (1.0, 0.82, 0.6)]
+    for k in range(3):
+        ang = k / 3 * math.tau + 0.4; rr = random.uniform(0.0, 0.35) if k else 0
+        bx, by = rr * math.cos(ang), rr * math.sin(ang); sc = random.uniform(0.7, 1.1) if k else 1.1
+        sh = 0.5 * sc
+        add('primitive_cylinder_add', STEM, smooth=True, vertices=12, radius=0.12 * sc, depth=sh, location=(bx, by, sh / 2))
+        CAP = solid_mat(f"cap{k}", caps[k], 0.5)
+        add('primitive_uv_sphere_add', CAP, smooth=True, radius=0.3 * sc, location=(bx, by, sh), segments=16, ring_count=8)
+        # 傘を半球に(下半分を潰す)
+        o = OBJS[-1]; o.scale = (1, 1, 0.6)
+        for d in range(6):
+            da = d / 6 * math.tau
+            add('primitive_ico_sphere_add', solid_mat(f"dot{k}_{d}", (1, 1, 1), 0.4), smooth=True, radius=0.04 * sc, location=(bx + 0.22 * sc * math.cos(da), by + 0.22 * sc * math.sin(da), sh + 0.12 * sc), subdivisions=1)
+
+
+def build_rock():
+    # 苔むした岩の塊 3-4個
+    ROCK = tex_mat("mrock", "tex_mossy_stone_ground.png", 2.0, 0.9)
+    MOSS = solid_mat("moss", (0.5, 0.72, 0.42), 0.85)
+    for k in range(4):
+        ang = random.uniform(0, math.tau); rr = random.uniform(0, 0.4) if k else 0
+        bx, by = rr * math.cos(ang), rr * math.sin(ang); sc = random.uniform(0.35, 0.7)
+        add('primitive_ico_sphere_add', ROCK, smooth=True, radius=sc, location=(bx, by, sc * 0.7), subdivisions=2)
+        o = OBJS[-1]; o.scale = (random.uniform(0.8, 1.3), random.uniform(0.8, 1.3), random.uniform(0.6, 0.9))
+        o.rotation_euler = (random.uniform(0, 1), random.uniform(0, 1), random.uniform(0, math.tau))
+        if k % 2 == 0:
+            add('primitive_ico_sphere_add', MOSS, smooth=True, radius=sc * 0.55, location=(bx, by, sc * 1.05), subdivisions=1)
+            OBJS[-1].scale = (1.1, 1.1, 0.4)
+
+
 def build_hill():
     # 遠景の丸い丘(回転体の緑の盛り上がり + 岩の露出 + 頂の小クリスタル群)。フォグに溶ける背景用。
     GRASS = tex_mat("grass", "tex_grass_flower_meadow.png", 1.6, 0.9)
@@ -373,7 +438,8 @@ def build_hill():
 
 BUILDERS = {'pillar': build_pillar, 'gate': build_gate, 'obelisk': build_obelisk, 'brazier': build_brazier,
             'canopy': build_canopy, 'railing': build_railing, 'island': build_island,
-            'fairytower': build_fairytower, 'hill': build_hill}
+            'fairytower': build_fairytower, 'hill': build_hill,
+            'grass': build_grass, 'flowers': build_flowers, 'mushroom': build_mushroom, 'rock': build_rock}
 BUILDERS[kind]()
 
 bpy.ops.object.select_all(action='DESELECT')
