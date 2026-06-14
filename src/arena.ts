@@ -406,29 +406,15 @@ export function buildArena(world: World, mapKey = 'skyhaven', lite = false) {
       color: 0x9fe8ff, emissive: 0x4fc6ff, emissiveIntensity: 0.55,
       metalness: 0.2, roughness: 0.22, transparent: true, opacity: 0.92,
     })
-    // 中央の大クリスタル群(登れない遮蔽。各シャードを衝突体に)。視覚は作り込みの群晶(struct_crystal)へ差し替え。
-    const shardMeshes: THREE.Object3D[] = []
-    for (const [px, pz, h] of [[0, 0, 5.6], [2.7, 1.5, 3.8], [-2.5, 1.7, 3.3], [1.9, -2.3, 3.1], [-2.1, -2.1, 3.6]] as const) {
-      shardMeshes.push(solid(new THREE.ConeGeometry(h * 0.34, h, 6), crystalMat, px, h / 2, pz, aabb(px, pz, h * 0.6, h, h * 0.6)))
+    // 中央は「泉のbasin」: 中心を空け、4本のクリスタルが湧き立つ縁取り(遮蔽リング)にする。
+    // 中央スフィア(0,3,0)を埋めると占領・LOSが通らず勝利条件が壊れるため、中心シャードは置かない(field-01修正)。
+    // 4本は占領拠点のカバーリングとして機能(レベルデザイン研究: per-sphere cover ring)。
+    for (const [px, pz, h] of [[2.7, 1.5, 3.8], [-2.5, 1.7, 3.3], [1.9, -2.3, 3.1], [-2.1, -2.1, 3.6]] as const) {
+      solid(new THREE.ConeGeometry(h * 0.34, h, 6), crystalMat, px, h / 2, pz, aabb(px, pz, h * 0.6, h, h * 0.6))
     }
-    {
-      let cdone = false
-      const tryCry = () => {
-        if (cdone) return
-        const g = getScenery('struct_crystal')
-        if (!g) return
-        cdone = true
-        const bb = new THREE.Box3().setFromObject(g)
-        g.scale.multiplyScalar(6.0 / Math.max(0.3, bb.max.y - bb.min.y))
-        g.position.set(0, -0.1, 0)
-        g.traverse((o) => { const m = o as THREE.Mesh; if (m.isMesh) { m.castShadow = true; m.receiveShadow = true } })
-        scene.add(g)
-        for (const s of shardMeshes) s.visible = false
-      }
-      tryCry()
-      if (!cdone) updates.push(tryCry)
-    }
-    emblemAt(0, 4.6, 0)
+    // 中央を覆う struct_crystal(0,0)差し替えは廃止: スフィアが見えず占領不能になるため。
+    // 縁取りの4シャードを恒久表示し、中央basinに浮くスフィアを露出させる(クリスタルスプリングの泉)。
+    emblemAt(0, 5.4, 0)
     // 対角のクリスタル壁(射線カット)
     wall(10, 10, 0.9, 8, 2.4); wall(-10, -10, 0.9, 8, 2.4)
     wall(10, -10, 8, 0.9, 2.4); wall(-10, 10, 8, 0.9, 2.4)
