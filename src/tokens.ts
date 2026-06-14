@@ -453,7 +453,7 @@ class SpiderMineUnit extends TokenUnit {
         this.world.removeUnit(this)
         const p = this.group.position.clone()
         p.y += 0.3
-        this.combat.explode(p, 3.5, 75, this.team, this)
+        this.combat.explode(p, 3.5, 62, this.team, this) // 75→62: 最安(35TP)・最大3・追尾で過剰だった爆発火力を是正
       }
     } else if (this.lamp) {
       this.lamp.emissiveIntensity = 0.8 + Math.sin(this.world.time * 5) * 0.6
@@ -611,7 +611,7 @@ class BomberUnit extends TokenUnit {
     }
     const t = this.target
     if (t && t.alive && this.fireCd <= 0) {
-      this.fireCd = 2.5 * this.world.fireBoostMul(this.team, this.group.position)
+      this.fireCd = 2.2 * this.world.fireBoostMul(this.team, this.group.position) // 2.5→2.2: 割高で低出力だった曲射の手数を改善
       const p = this.group.position
       const tp = t.group.position
       const dx = tp.x - p.x
@@ -629,7 +629,7 @@ class BomberUnit extends TokenUnit {
       const yaw = Math.atan2(dx, dz)
       this.group.rotation.y = yaw
       this.combat.fireBolt(muzzle, vel.clone().normalize(), {
-        damage: 18, team: this.team, from: this, speed: vel.length(),
+        damage: 24, team: this.team, from: this, speed: vel.length(), // 18→24: 50TPに見合う出力へ
         explosive: { radius: 2.5 }, gravity: g, maxRange: 80,
         color: this.team === 'blue' ? 0x6ec8ff : 0xff8a78, size: 0.16,
       })
@@ -682,7 +682,7 @@ class SniperDroneUnit extends TokenUnit {
       const dir = t.group.position.clone().sub(p)
       this.group.rotation.y = lerpAngle(this.group.rotation.y, Math.atan2(dir.x, dir.z), dt * 3)
       if (this.fireCd <= 0) {
-        this.fireCd = 2.0 * this.world.fireBoostMul(this.team, this.group.position)
+        this.fireCd = 1.7 * this.world.fireBoostMul(this.team, this.group.position) // 2.0→1.7: 50TP・脆弱に見合う手数へ
         const muzzle = p.clone()
         this.fireBoltAt(t, muzzle, 18, 200, 0.006)
         this.sfx.shotFar(0.14)
