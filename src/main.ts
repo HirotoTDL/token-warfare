@@ -194,8 +194,10 @@ class MenuView implements View {
       const ts = focused ? 1.2 : this.showcase ? 0.8 : 1.0
       const s = m.scale.x + (ts - m.scale.x) * k
       m.scale.setScalar(s)
-      // 向き: 注目中はゆったり見回し(正面寄り)、それ以外は控えめスウェイ
-      m.rotation.y = focused ? Math.sin(this.t * 0.7) * 0.4 : Math.sin(this.t * 1.6 + i * 1.3) * 0.06
+      // 向き: 選択画面ではカメラ側(正面)を向かせる(モデル正面が-Zのため+π)。
+      // 注目中はゆったり見回し、それ以外は控えめスウェイ。
+      const faceBase = this.showcase ? Math.PI : 0
+      m.rotation.y = faceBase + (focused ? Math.sin(this.t * 0.7) * 0.35 : Math.sin(this.t * 1.6 + i * 1.3) * 0.06)
       m.rotation.z = focused ? 0 : Math.sin(this.t * 2 + i) * 0.015
       // モーション: リグ済みは関節アニメ、無リグは体アニメ。注目中は活発に動かす
       const amp = focused ? 0.55 : this.showcase ? 0.1 : 0.14
@@ -208,8 +210,8 @@ class MenuView implements View {
       const target = new THREE.Vector3()
       const look = new THREE.Vector3()
       if (this.focusIdx !== null && this.monsters[this.focusIdx]) {
-        target.set(0, 1.75, stageZ + 3.2)
-        look.set(0, 1.2, stageZ)
+        target.set(0, 1.5, stageZ + 4.1)
+        look.set(0, 1.0, stageZ)
       } else {
         target.set(Math.sin(this.t * 0.12) * 2.5, 3.0, 16.5)
         look.set(0, 1.2, 9)
