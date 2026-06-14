@@ -206,6 +206,10 @@ export const MODEL_MANIFEST: { key: string; height: number }[] = [
   { key: 'prop_flowercart', height: 1.8 }, { key: 'prop_altar', height: 2.8 },
   // フェアリィ大樹(遠景の手続き樹を格上げ)
   { key: 'prop_tree', height: 22 }, { key: 'prop_tree2', height: 20 },
+  // 作り込み障害物(四角/円柱の手続き遮蔽を格上げ)。高さはcrate/wall側でスケール
+  { key: 'cover_crystal', height: 2.0 }, { key: 'cover_cargo', height: 2.0 },
+  { key: 'cover_boulder', height: 1.3 }, { key: 'cover_ruin', height: 2.4 },
+  { key: 'cover_hedge', height: 1.6 },
   // FP武器ビューモデル(高さ正規化はビューモデル側で再調整)
   { key: 'weapon_blaster', height: 0.4 },
 ]

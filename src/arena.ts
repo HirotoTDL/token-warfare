@@ -246,12 +246,35 @@ export function buildArena(world: World, mapKey = 'skyhaven') {
     return m
   }
 
-  // コンテナ箱のテクスチャ(AI生成 tex_crate があれば使用、無ければポップ単色)
+  // 手続き遮蔽メッシュを、作り込み3Dモデルがロード次第差し替える(コライダー/カバー点は不変)。
+  // ロード前は手続きメッシュがフォールバック表示される。
+  let craftIdx = 0
+  function craftedSwap(fallback: THREE.Object3D[], key: string, cx: number, cz: number, targetH: number) {
+    const ry = (craftIdx++ * 2.39) % (Math.PI * 2)
+    let done = false
+    const tryPlace = () => {
+      if (done) return
+      const g = getScenery(key)
+      if (!g) return
+      done = true
+      for (const m of fallback) m.visible = false
+      const bb = new THREE.Box3().setFromObject(g)
+      const hNow = bb.max.y - bb.min.y
+      g.scale.multiplyScalar(targetH / Math.max(0.3, hNow))
+      g.position.set(cx, -0.05, cz)
+      g.rotation.y = ry
+      g.traverse((o) => { const mm = o as THREE.Mesh; if (mm.isMesh) { mm.castShadow = true; mm.receiveShadow = true } })
+      scene.add(g)
+    }
+    tryPlace()
+    if (!done) updates.push(() => tryPlace())
+  }
+
+  // クレート → 作り込み(魔法カーゴ堆/苔むした巨岩)。飛び乗り遮蔽。
   const crateMatBase = new THREE.MeshStandardMaterial({ color: 0x9aa3b2, roughness: 0.55, metalness: 0.35 })
   applyExtTexture(crateMatBase, 'tex_crate', [1, 1])
   function crate(cx: number, cz: number, size: number) {
     crateIdx++
-    // テクスチャは共有(非同期ロード後に全クレートへ反映)。立体感はエッジトリムで付与
     const m = solid(new THREE.BoxGeometry(size, size, size), crateMatBase, cx, size / 2, cz, aabb(cx, cz, size, size, size))
     const trimColor = POP[crateIdx % POP.length]
     const trim = new THREE.Mesh(
@@ -260,11 +283,38 @@ export function buildArena(world: World, mapKey = 'skyhaven') {
     )
     trim.position.set(cx, size - size * 0.03, cz)
     scene.add(trim)
+    craftedSwap([m, trim], size >= 1.6 ? 'cover_cargo' : 'cover_boulder', cx, cz, size * 1.08)
     return m
   }
 
+  // 壁 → 作り込みモデルの列(花生垣/遺跡柱)で差し替え。コライダーは元の箱1つのまま。
   function wall(cx: number, cz: number, w: number, d: number, h = 2.4) {
-    solid(new THREE.BoxGeometry(w, h, d), wallMat, cx, h / 2, cz, aabb(cx, cz, w, h, d))
+    const m = solid(new THREE.BoxGeometry(w, h, d), wallMat, cx, h / 2, cz, aabb(cx, cz, w, h, d))
+    const key = h >= 2.0 ? 'cover_ruin' : 'cover_hedge'
+    const alongX = w >= d
+    const length = alongX ? w : d
+    const count = Math.max(1, Math.round(length / 2.6))
+    let placed = 0
+    const trySeg = () => {
+      while (placed < count) {
+        const g = getScenery(key)
+        if (!g) return
+        const t = count === 1 ? 0 : (placed / (count - 1) - 0.5) * Math.max(0, length - 1.4)
+        const sx = alongX ? cx + t : cx
+        const sz = alongX ? cz : cz + t
+        const bb = new THREE.Box3().setFromObject(g)
+        const hNow = bb.max.y - bb.min.y
+        g.scale.multiplyScalar(h / Math.max(0.3, hNow))
+        g.position.set(sx, -0.05, sz)
+        g.rotation.y = (alongX ? 0 : Math.PI / 2) + (placed % 2 ? 0.25 : -0.2)
+        g.traverse((o) => { const mm = o as THREE.Mesh; if (mm.isMesh) { mm.castShadow = true; mm.receiveShadow = true } })
+        scene.add(g)
+        placed++
+      }
+      m.visible = false
+    }
+    trySeg()
+    if (placed < count) updates.push(trySeg)
   }
 
   const barrelMat = new THREE.MeshStandardMaterial({ color: 0xff5040, roughness: 0.45, metalness: 0.3 })
@@ -272,7 +322,8 @@ export function buildArena(world: World, mapKey = 'skyhaven') {
   const barrelGeo = new THREE.CylinderGeometry(0.5, 0.5, 1.15, 14)
   let bIdx = 0
   function barrel(bx: number, bz: number) {
-    solid(barrelGeo, bIdx++ % 2 ? barrelMat : barrelMat2, bx, 0.575, bz, aabb(bx, bz, 1.0, 1.15, 1.0), false)
+    const m = solid(barrelGeo, bIdx++ % 2 ? barrelMat : barrelMat2, bx, 0.575, bz, aabb(bx, bz, 1.0, 1.15, 1.0), false)
+    craftedSwap([m], 'cover_crystal', bx, bz, 1.25)
   }
   const pillarMat = new THREE.MeshStandardMaterial({ color: 0x8a94a2, roughness: 0.5, metalness: 0.45 })
   applyExtTexture(pillarMat, 'tex_jewel_inlay_panel', [1, 2])
