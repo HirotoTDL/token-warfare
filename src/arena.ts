@@ -440,6 +440,107 @@ export function buildArena(world: World, mapKey = 'skyhaven') {
     })
     emblemAt(0, DECK + 1.0, 0)
 
+    // --- フェアリィ・プロップ作り込み(Codex生成テクスチャを活用) ---
+    {
+      const texMat = (name: string, opt: THREE.MeshStandardMaterialParameters = {}) => {
+        const m = new THREE.MeshStandardMaterial({ roughness: 0.72, metalness: 0.08, ...opt })
+        applyExtTexture(m, name, [1, 1])
+        return m
+      }
+      const chestMat = texMat('tex_treasure_chest_surface')
+      const lanternMat = texMat('tex_lantern_paper', { emissive: 0xffcf86, emissiveIntensity: 0.9 })
+      const fountainMat = texMat('tex_fountain_stone')
+      const waterMat = texMat('tex_luminous_water', { transparent: true, opacity: 0.82, roughness: 0.2, metalness: 0.3, emissive: 0x6fd0e8, emissiveIntensity: 0.4 })
+      const flagMat = texMat('tex_flag_cloth', { side: THREE.DoubleSide })
+      const mushMat = texMat('tex_mushroom_cap_surface')
+      const soilMat = texMat('tex_flower_bed_soil')
+      const poleMat = new THREE.MeshStandardMaterial({ color: 0xcdbfae, roughness: 0.8, metalness: 0.2 })
+
+      // 宝箱(低い遮蔽=飛び乗り可)
+      const chest = (x: number, z: number, ry: number) => {
+        const g = new THREE.Group()
+        const body = new THREE.Mesh(new THREE.BoxGeometry(1.1, 0.72, 0.82), chestMat)
+        body.position.y = 0.36
+        const lid = new THREE.Mesh(new THREE.CylinderGeometry(0.41, 0.41, 1.1, 14, 1, false, 0, Math.PI), chestMat)
+        lid.rotation.z = Math.PI / 2
+        lid.position.y = 0.72
+        g.add(body, lid)
+        g.position.set(x, 0, z)
+        g.rotation.y = ry
+        g.traverse((o) => { const m = o as THREE.Mesh; if (m.isMesh) { m.castShadow = true; m.receiveShadow = true } })
+        scene.add(g)
+        world.addCollider(aabb(x, z, 1.2, 1.0, 0.95))
+        world.obstacleMeshes.push(body)
+      }
+      chest(13, -3, 0.5); chest(-13, 3, -0.7); chest(21, 17, 1.2); chest(-21, -17, 2.1)
+
+      // 提灯ポスト(発光・雰囲気づくり)
+      const lantern = (x: number, z: number) => {
+        const pole = new THREE.Mesh(new THREE.CylinderGeometry(0.08, 0.11, 3.0, 8), poleMat)
+        pole.position.set(x, 1.5, z)
+        pole.castShadow = true
+        const shade = new THREE.Mesh(new THREE.SphereGeometry(0.46, 14, 12), lanternMat)
+        shade.scale.y = 1.3
+        shade.position.set(x, 3.15, z)
+        scene.add(pole, shade)
+        const lt = new THREE.PointLight(0xffcf86, 7, 13, 2)
+        lt.position.set(x, 3.0, z)
+        scene.add(lt)
+        updates.push((_dt, t) => {
+          ;(shade.material as THREE.MeshStandardMaterial).emissiveIntensity = 0.8 + Math.sin(t * 2.5 + x) * 0.2
+        })
+      }
+      lantern(9, 9); lantern(-9, -9); lantern(9, -9); lantern(-9, 9)
+
+      // 噴水(フランク広場の装飾。小さな遮蔽)
+      const fountain = (x: number, z: number) => {
+        const base = new THREE.Mesh(new THREE.CylinderGeometry(2.0, 2.3, 0.6, 18), fountainMat)
+        base.position.set(x, 0.3, z)
+        base.castShadow = true; base.receiveShadow = true
+        const water = new THREE.Mesh(new THREE.CylinderGeometry(1.7, 1.7, 0.18, 18), waterMat)
+        water.position.set(x, 0.56, z)
+        const stem = new THREE.Mesh(new THREE.CylinderGeometry(0.22, 0.32, 1.3, 10), fountainMat)
+        stem.position.set(x, 1.05, z)
+        const top = new THREE.Mesh(new THREE.SphereGeometry(0.42, 12, 10), waterMat)
+        top.position.set(x, 1.85, z)
+        scene.add(base, water, stem, top)
+        world.addCollider(aabb(x, z, 4.0, 0.8, 4.0))
+        world.obstacleMeshes.push(base)
+        updates.push((_dt, t) => { top.position.y = 1.85 + Math.sin(t * 2) * 0.06 })
+      }
+      fountain(24, -2); fountain(-24, 2)
+
+      // 花壇(低い装飾)とキノコ叢(雰囲気)
+      const flowerbed = (x: number, z: number, w: number, d: number) => {
+        const bed = new THREE.Mesh(new THREE.BoxGeometry(w, 0.4, d), soilMat)
+        bed.position.set(x, 0.2, z)
+        bed.receiveShadow = true
+        scene.add(bed)
+      }
+      flowerbed(6, -19, 5, 1.6); flowerbed(-6, 19, 5, 1.6); flowerbed(19, -19, 3, 3)
+      const mushroom = (x: number, z: number, s: number) => {
+        const stem = new THREE.Mesh(new THREE.CylinderGeometry(s * 0.22, s * 0.28, s, 8), poleMat)
+        stem.position.set(x, s / 2, z)
+        const cap = new THREE.Mesh(new THREE.SphereGeometry(s * 0.55, 12, 8, 0, Math.PI * 2, 0, Math.PI / 2), mushMat)
+        cap.position.set(x, s, z)
+        cap.castShadow = true
+        scene.add(stem, cap)
+      }
+      mushroom(7, -18, 1.6); mushroom(8.4, -18.6, 1.0); mushroom(-7, 18, 1.6); mushroom(-8.4, 18.6, 1.0)
+      mushroom(18, -20, 1.3); mushroom(-18, 20, 1.3)
+
+      // 両軍ベース上の旗(陣営の旗布)
+      for (const team of ['blue', 'red'] as Team[]) {
+        const bp = world.basePos[team]
+        const pole = new THREE.Mesh(new THREE.CylinderGeometry(0.07, 0.09, 5.5, 8), poleMat)
+        pole.position.set(bp.x, 2.75, bp.z)
+        const flag = new THREE.Mesh(new THREE.PlaneGeometry(2.4, 1.5), flagMat)
+        flag.position.set(bp.x + 1.25, 4.6, bp.z)
+        scene.add(pole, flag)
+        updates.push((_dt, t) => { flag.rotation.y = Math.sin(t * 1.5 + (team === 'red' ? 1 : 0)) * 0.25 })
+      }
+    }
+
     // コア出現スポット(地上+高所デッキで縦の駆け引き)
     world.coreSpots = [
       new THREE.Vector3(0, DECK, 0), new THREE.Vector3(16, 1.6, 2), new THREE.Vector3(-16, 1.6, 2),
