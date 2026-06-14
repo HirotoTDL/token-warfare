@@ -7,7 +7,9 @@ export type SphereId = 'center' | 'blueBase' | 'redBase'
 
 // リサーチ(ゾーン制圧FPS先行事例)に基づく値:
 export const CAP_THRESHOLD = 0.55 // |charge|がこれ以上で占領。±0.55未満は「無色=係争帯」を残す(Overwatch/Halo KOTH)
-export const CAPTURE_PER_DAMAGE = 0.012 // 与ダメ1あたりのcharge変化(将単独で中央0→0.55を約4〜5秒射撃で確保。瞬間占領を防ぐバッファ)
+// 与ダメ1あたりのcharge変化。将(50〜88DPS)で中央0→0.55を約2.6〜4.6秒射撃で確保=瞬間占領を防ぐバッファ。
+// (旧0.012は約0.9秒で瞬間占領になっていた=研究の禁止事項。0.0025へ是正。トークン供給はsupply()で直値charge/s)
+export const CAPTURE_PER_DAMAGE = 0.0025
 export const CAPTURE_TO_WIN = 30 // 勝利カウント
 export const SPHERE_RADIUS = 1.6 // 当たり判定/見た目半径
 export const CONTEST_WINDOW = 0.5 // 直近この秒数に両軍から被弾していれば「係争中」
@@ -60,6 +62,16 @@ export class Sphere {
     let amt = amount
     if (this.penaltyTeam === team && this.penaltyT > 0) amt *= 0.5
     this.charge += (team === 'blue' ? 1 : -1) * amt * CAPTURE_PER_DAMAGE
+    this.charge = Math.max(-1, Math.min(1, this.charge))
+    if (team === 'blue') this.hitBlue = 0
+    else this.hitRed = 0
+  }
+
+  /** 占領支援トークンの持続供給(charge/秒の直値。damage()を経由しない)。係争・ペナルティに乗せ対処可能を担保 */
+  supply(team: Team, chargePerSec: number, dt: number) {
+    let amt = chargePerSec * dt
+    if (this.penaltyTeam === team && this.penaltyT > 0) amt *= 0.5
+    this.charge += (team === 'blue' ? 1 : -1) * amt
     this.charge = Math.max(-1, Math.min(1, this.charge))
     if (team === 'blue') this.hitBlue = 0
     else this.hitRed = 0

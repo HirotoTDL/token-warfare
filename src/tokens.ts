@@ -50,6 +50,10 @@ export abstract class TokenUnit implements Unit {
   hitMeshes: THREE.Mesh[] = []
   radius: number
   height: number
+  /** 起動ディレイ(秒)。配備直後この秒数は機能停止=即効果を防ぎ配置読みを成立させる。各updateの先頭でガード */
+  protected activeT = 0
+  /** 起動済みか(オーラ系トークンの効果がworld側から起動ディレイを尊重するための公開フラグ) */
+  get armed(): boolean { return this.activeT <= 0 }
 
   protected world: World
   protected combat: Combat
@@ -217,6 +221,18 @@ export abstract class TokenUnit implements Unit {
   }
 
   /** 索敵: range内・LOSあり・非ステルスの最寄り敵(敵ジャマーで距離半減) */
+  /** 占領支援トークンが支援すべきスフィア(中央→敵陣→自陣防衛、支配中はnull) */
+  protected targetSphere() {
+    const o = this.world.objectives
+    if (!o) return null
+    const me = this.team
+    const enemy = enemyOf(this.team)
+    if (o.center.owner() !== me) return o.center
+    if (o.base[enemy].owner() !== me) return o.base[enemy]
+    if (o.base[me].owner() !== me) return o.base[me]
+    return null
+  }
+
   protected findTarget(range: number, eyeH = 1.0): Unit | null {
     const effRange = range * this.world.senseRangeMul(this.team, this.group.position)
     let best: Unit | null = null
@@ -259,19 +275,45 @@ class GunnerUnit extends TokenUnit {
   private pathT = 0
   private pi = 0
   private bobT = Math.random() * 6
+  private supplyT = 0
 
   constructor(world: World, combat: Combat, sfx: Sfx, team: Team, pos: THREE.Vector3) {
-    super(world, combat, sfx, team, 'gunner', 'ガンナー', resolveModel('token_gunner', team, () => buildGunner(team)), pos, 60, 0.4, 1.3)
+    super(world, combat, sfx, team, 'gunner', 'ガンナー', resolveModel('token_gunner', team, () => buildGunner(team)), pos, 55, 0.4, 1.3)
+    this.activeT = 0.7
   }
 
   update(dt: number) {
     this.updateFlash(dt)
+    if ((this.activeT -= dt) > 0) { this.updateWalkAnim(dt); this.group.updateMatrixWorld(); return } // 起動ディレイ
     this.retargetT -= dt
     this.fireCd -= dt
+    this.supplyT -= dt
     this.bobT += dt
     if (this.retargetT <= 0) {
       this.retargetT = 0.45
       this.target = this.findTarget(45, 1.1)
+    }
+    // --- 占領支援: 優先スフィアへ前進し、射線が通る間だけ占領を供給する ---
+    const sp = this.targetSphere()
+    let supplied = false
+    if (sp) {
+      const d = flatDist(sp.pos, this.group.position)
+      const eye = this.group.position.clone()
+      eye.y += 1.0
+      if (d <= 12 && this.world.hasLOS(eye, sp.pos)) {
+        // 同種スタックは逓減(1機0.03 / 2機計0.045 / 3機計0.045)で過剰占領を防止
+        const n = Math.max(1, this.world.countActive(this.team, 'gunner'))
+        const per = (n >= 2 ? 0.045 : 0.03) / n
+        sp.supply(this.team, per, dt)
+        supplied = true
+        if (this.supplyT <= 0) {
+          this.supplyT = 0.12
+          this.combat.fx.tracer(eye, sp.pos.clone(), this.team === 'blue' ? 0x6ec8ff : 0xff8a78)
+        }
+        if (!this.target) this.faceDir(sp.pos.clone().sub(this.group.position).setY(0).normalize(), dt)
+      } else if (d > 11) {
+        this.moveToward(sp.pos, 3.2, dt, !this.target)
+      }
     }
     const t = this.target
     if (t && t.alive && !t.stealthed) {
@@ -280,15 +322,18 @@ class GunnerUnit extends TokenUnit {
       dir.y = 0
       dir.normalize()
       this.faceDir(dir, dt)
-      if (dist > 14) this.moveToward(t.group.position, 3.2, dt, false)
+      // 占領中でなく敵が遠ければ詰める(占領優先なのでスフィア圏内では動かない)
+      if (!supplied && dist > 14) this.moveToward(t.group.position, 3.2, dt, false)
       if (this.fireCd <= 0) {
         this.fireCd = 0.5 * this.world.fireBoostMul(this.team, this.group.position)
         const muzzle = this.group.position.clone()
         muzzle.y += 1.0
-        this.fireBoltAt(t, muzzle, 7, 80, 0.03)
+        // 対トークン7 / 対将は0.7倍(≈5)。トークン同士の撃ち合いを主、対人は牽制に留める
+        this.fireBoltAt(t, muzzle, t.isCommander ? 4.9 : 7, 80, 0.03)
         this.sfx.shotFar(0.07)
       }
-    } else {
+    } else if (!sp) {
+      // 支配達成(支援先なし)かつ敵なし: 旧来の敵将進軍で詰めの圧をかける
       this.target = null
       const cmd = this.world.commanderOf(enemyOf(this.team))
       if (cmd && cmd.alive) {
@@ -321,10 +366,12 @@ class SentryUnit extends TokenUnit {
     super(world, combat, sfx, team, 'sentry', 'セントリー', resolveModel('token_sentry', team, () => buildSentry(team)), pos, 120, 0.55, 1.25)
     // GLBモデルにはヘッドが無いため、その場合は本体ごと旋回する
     this.head = (this.group.userData.head as THREE.Object3D) ?? this.group
+    this.activeT = 1.0 // 設置後1秒は起動待機(配置を読まれる猶予)
   }
 
   update(dt: number) {
     this.updateFlash(dt)
+    if ((this.activeT -= dt) > 0) { this.group.updateMatrixWorld(); return } // 起動ディレイ
     this.retargetT -= dt
     this.fireCd -= dt
     if (this.retargetT <= 0) {
@@ -357,39 +404,68 @@ class SentryUnit extends TokenUnit {
   }
 }
 
+// ヒールドローン: 占領支援トークン。優先スフィアの直下を低空でホバリングして占領を供給し、
+// 近くの味方トークンを回復する(将は回復しない=対人サポートではなく盤面サポートへ役割転換)。
+// 低空ゆえ地上の将に撃ち落とされやすく、これが敵側のカウンター手段になる。
 class HealDroneUnit extends TokenUnit {
   private healT = 0
+  private supplyT = 0
   private orbitT = Math.random() * 6
 
   constructor(world: World, combat: Combat, sfx: Sfx, team: Team, pos: THREE.Vector3) {
     super(world, combat, sfx, team, 'healer', 'ヒールドローン', resolveModel('token_healer', team, () => buildHealDrone(team)), pos, 40, 0.35, 0.6)
-    this.group.position.y = 2.0
+    this.group.position.y = 1.4
+    this.activeT = 0.8
   }
 
   update(dt: number) {
     this.updateFlash(dt)
+    if ((this.activeT -= dt) > 0) { this.group.position.y = 1.4; this.group.rotation.y += dt; this.group.updateMatrixWorld(); return }
     this.orbitT += dt
     this.healT -= dt
-    const owner = this.world.commanderOf(this.team)
+    this.supplyT -= dt
     const p = this.group.position
-    if (owner && owner.alive) {
-      const target = owner.group.position.clone()
-      target.x += Math.cos(this.orbitT * 0.9) * 1.8
-      target.z += Math.sin(this.orbitT * 0.9) * 1.8
-      target.y = owner.group.position.y + 2.3 + Math.sin(this.orbitT * 2.2) * 0.15
-      p.lerp(target, Math.min(1, dt * 2.8))
-      const lim = this.world.arenaHalf - 1
+    const lim = this.world.arenaHalf - 1
+    // 支援先スフィア(無ければ自陣スフィアに待機して防衛供給)
+    const sp = this.targetSphere() ?? this.world.objectives?.base[this.team] ?? null
+    if (sp) {
+      const target = sp.pos.clone()
+      target.x += Math.cos(this.orbitT * 0.8) * 1.6
+      target.z += Math.sin(this.orbitT * 0.8) * 1.6
+      target.y = 1.4 + Math.sin(this.orbitT * 2.2) * 0.18 // 低空: 地上将のリーチ内=撃墜可能
+      p.lerp(target, Math.min(1, dt * 2.6))
       p.x = Math.max(-lim, Math.min(lim, p.x))
       p.z = Math.max(-lim, Math.min(lim, p.z))
-      if (this.healT <= 0 && owner.hp < owner.maxHp && p.distanceTo(owner.group.position) < 9) {
-        this.healT = 0.5
-        owner.hp = Math.min(owner.maxHp, owner.hp + 3)
-        const chest = owner.group.position.clone()
-        chest.y += owner.height * 0.6
-        this.combat.fx.tracer(p.clone(), chest, 0x6effa8)
+      // 占領供給(味方ヒーラー数で逓減=スタック過剰防止)
+      const eye = p.clone()
+      if (flatDist(sp.pos, p) <= 12 && this.world.hasLOS(eye, sp.pos)) {
+        const n = Math.max(1, this.world.countActive(this.team, 'healer'))
+        sp.supply(this.team, 0.03 / n, dt)
+        if (this.supplyT <= 0) {
+          this.supplyT = 0.14
+          this.combat.fx.tracer(eye, sp.pos.clone(), this.team === 'blue' ? 0x8effd0 : 0xffb0a0)
+        }
       }
     } else {
-      p.y = 2.0 + Math.sin(this.orbitT * 2) * 0.2
+      p.y = 1.4 + Math.sin(this.orbitT * 2) * 0.2
+    }
+    // 近接の味方トークンを回復(6HP/秒)。将は対象外
+    if (this.healT <= 0) {
+      let inj: Unit | null = null
+      let bd = 8
+      for (const u of this.world.units) {
+        if (!u.alive || u.team !== this.team || u.isCommander || u === this) continue
+        if (u.hp >= u.maxHp) continue
+        const d = flatDist(u.group.position, p)
+        if (d < bd) { bd = d; inj = u }
+      }
+      if (inj) {
+        this.healT = 0.4
+        inj.hp = Math.min(inj.maxHp, inj.hp + 6 * 0.4)
+        const c = inj.group.position.clone()
+        c.y += inj.height * 0.6
+        this.combat.fx.tracer(p.clone(), c, 0x6effa8)
+      }
     }
     this.group.rotation.y += dt * 1.5
     this.group.updateMatrixWorld()
@@ -399,13 +475,16 @@ class HealDroneUnit extends TokenUnit {
 class StrikerUnit extends TokenUnit {
   private retargetT = 0
   private target: Unit | null = null
+  private chaseT = 0
 
   constructor(world: World, combat: Combat, sfx: Sfx, team: Team, pos: THREE.Vector3) {
     super(world, combat, sfx, team, 'striker', 'ストライカー', resolveModel('token_striker', team, () => buildStriker(team)), pos, 50, 0.4, 0.6)
+    this.activeT = 0.6
   }
 
   update(dt: number) {
     this.updateFlash(dt)
+    if ((this.activeT -= dt) > 0) { this.group.updateMatrixWorld(); return } // 起動ディレイ
     this.retargetT -= dt
     if (this.retargetT <= 0 || !this.target || !this.target.alive) {
       this.retargetT = 0.5
@@ -413,14 +492,19 @@ class StrikerUnit extends TokenUnit {
     }
     const t = this.target
     if (t && t.alive) {
+      const d = flatDist(t.group.position, this.group.position)
       this.moveToward(t.group.position, 7, dt)
       this.group.rotation.z = Math.sin(this.world.time * 14) * 0.06
-      if (flatDist(t.group.position, this.group.position) < 1.6) {
+      // 失速ロジック: 標的の至近(10m)に踏み込んでから2秒以内に接触できなければその場で自爆。
+      // 回避し続ければ振り切れる=対人の理不尽な追尾圧を抑える counterplay
+      if (d < 10) this.chaseT += dt
+      else this.chaseT = 0
+      if (d < 1.6 || this.chaseT >= 2) {
         this.alive = false
         this.world.removeUnit(this)
         const p = this.group.position.clone()
         p.y += 0.4
-        this.combat.explode(p, 4.5, 55, this.team, this)
+        this.combat.explode(p, 4.0, 48, this.team, this) // 55→48 / r4.5→4.0: 対人即死圧を是正
       }
     }
     this.group.updateMatrixWorld()
@@ -431,14 +515,21 @@ class SpiderMineUnit extends TokenUnit {
   private retargetT = 0
   private target: Unit | null = null
   private lamp: THREE.MeshStandardMaterial | null
+  private chaseT = 0
 
   constructor(world: World, combat: Combat, sfx: Sfx, team: Team, pos: THREE.Vector3) {
     super(world, combat, sfx, team, 'mine', 'スパイダーマイン', resolveModel('token_mine', team, () => buildSpiderMine(team)), pos, 30, 0.3, 0.5)
     this.lamp = (this.group.userData.lamp as THREE.MeshStandardMaterial) ?? null
+    this.activeT = 0.8 // 設置後0.8秒は不活性(踏む前に視認・破壊する猶予)
   }
 
   update(dt: number) {
     this.updateFlash(dt)
+    if ((this.activeT -= dt) > 0) {
+      if (this.lamp) this.lamp.emissiveIntensity = 0.3 // 起動前は薄く点灯
+      this.group.updateMatrixWorld()
+      return
+    }
     this.retargetT -= dt
     if (this.retargetT <= 0) {
       this.retargetT = 0.35
@@ -446,17 +537,19 @@ class SpiderMineUnit extends TokenUnit {
     }
     const t = this.target
     if (t && t.alive && !t.stealthed) {
-      this.moveToward(t.group.position, 6.5, dt)
+      this.moveToward(t.group.position, 5.5, dt) // 6.5→5.5: 直線では将に振り切られる速度に
       if (this.lamp) this.lamp.emissiveIntensity = 2.2
-      if (flatDist(t.group.position, this.group.position) < 1.35) {
+      this.chaseT += dt // 追尾上限3秒: 振り切られたら自爆して粘着を断つ
+      if (flatDist(t.group.position, this.group.position) < 1.35 || this.chaseT >= 3) {
         this.alive = false
         this.world.removeUnit(this)
         const p = this.group.position.clone()
         p.y += 0.3
-        this.combat.explode(p, 3.5, 62, this.team, this) // 75→62: 最安(35TP)・最大3・追尾で過剰だった爆発火力を是正
+        this.combat.explode(p, 3.5, 52, this.team, this) // 62→52: 最安(35TP)・最大3・追尾で過剰だった爆発火力を是正
       }
-    } else if (this.lamp) {
-      this.lamp.emissiveIntensity = 0.8 + Math.sin(this.world.time * 5) * 0.6
+    } else {
+      this.chaseT = 0
+      if (this.lamp) this.lamp.emissiveIntensity = 0.8 + Math.sin(this.world.time * 5) * 0.6
     }
     this.group.updateMatrixWorld()
   }
@@ -466,7 +559,7 @@ class SpiderMineUnit extends TokenUnit {
 class WallPodUnit extends TokenUnit {
   private box: AABB
   private deployed = false
-  private deployT = 0.35
+  private deployT = 1.0 // 0.35→1.0: 壁が射線/経路を塞ぐまで1秒。配置を読まれる猶予(起動ディレイ統合)
 
   constructor(world: World, combat: Combat, sfx: Sfx, team: Team, pos: THREE.Vector3, dir?: THREE.Vector3) {
     // 壁は配備者の向きに対して垂直(=正面を塞ぐ)。AABB制約のため軸スナップ
@@ -486,7 +579,7 @@ class WallPodUnit extends TokenUnit {
     this.updateFlash(dt)
     if (!this.deployed) {
       this.deployT -= dt
-      this.group.scale.y = Math.min(1, this.group.scale.y + dt * 3.2)
+      this.group.scale.y = Math.min(1, this.group.scale.y + dt * 1.05)
       if (this.deployT <= 0) {
         this.deployed = true
         this.group.scale.y = 1
@@ -517,10 +610,12 @@ class BoosterUnit extends TokenUnit {
   constructor(world: World, combat: Combat, sfx: Sfx, team: Team, pos: THREE.Vector3) {
     super(world, combat, sfx, team, 'booster', 'ブースターパイロン', resolveModel('token_booster', team, () => buildBooster(team)), pos, 80, 0.45, 1.2)
     this.crystal = (this.group.userData.crystal as THREE.Object3D) ?? null
+    this.activeT = 1.0 // 起動まで1秒はオーラ無効(armed=falseでworld側がゲート)
   }
 
   update(dt: number) {
     this.updateFlash(dt)
+    if (this.activeT > 0) this.activeT -= dt // 視覚は回すがオーラはarmedで自動ゲート
     this.pulseT += dt
     if (this.crystal) {
       this.crystal.rotation.y += dt * 2.2
@@ -541,11 +636,17 @@ class ChaserUnit extends TokenUnit {
   private pathT = 0
 
   constructor(world: World, combat: Combat, sfx: Sfx, team: Team, pos: THREE.Vector3) {
-    super(world, combat, sfx, team, 'chaser', 'チェイサー', resolveModel('token_chaser', team, () => buildChaser(team)), pos, 45, 0.35, 0.7)
+    super(world, combat, sfx, team, 'chaser', 'チェイサー', resolveModel('token_chaser', team, () => buildChaser(team)), pos, 50, 0.35, 0.7)
+    this.activeT = 0.5
   }
 
   update(dt: number) {
     this.updateFlash(dt)
+    if ((this.activeT -= dt) > 0) { this.updateWalkAnim(dt); this.group.updateMatrixWorld(); return } // 起動ディレイ
+    // 近接2m以内の敵ステルスを暴く(ステルス将/デコイへのカウンター=偵察犬の役割)
+    for (const u of this.world.enemiesOf(this.team)) {
+      if (u.stealthed && flatDist(u.group.position, this.group.position) < 2) u.stealthed = false
+    }
     const prey = this.world.commanderOf(enemyOf(this.team))
     if (prey && prey.alive) {
       const dist = flatDist(prey.group.position, this.group.position)
@@ -587,10 +688,12 @@ class BomberUnit extends TokenUnit {
 
   constructor(world: World, combat: Combat, sfx: Sfx, team: Team, pos: THREE.Vector3) {
     super(world, combat, sfx, team, 'bomber', 'ボムスリンガー', resolveModel('token_bomber', team, () => buildBomber(team)), pos, 90, 0.5, 1.0)
+    this.activeT = 1.0
   }
 
   update(dt: number) {
     this.updateFlash(dt)
+    if ((this.activeT -= dt) > 0) { this.group.updateMatrixWorld(); return } // 起動ディレイ
     this.fireCd -= dt
     this.retargetT -= dt
     if (this.retargetT <= 0) {
@@ -611,7 +714,7 @@ class BomberUnit extends TokenUnit {
     }
     const t = this.target
     if (t && t.alive && this.fireCd <= 0) {
-      this.fireCd = 2.2 * this.world.fireBoostMul(this.team, this.group.position) // 2.5→2.2: 割高で低出力だった曲射の手数を改善
+      this.fireCd = 2.0 * this.world.fireBoostMul(this.team, this.group.position) // 2.2→2.0: コスト45に見合う手数へ
       const p = this.group.position
       const tp = t.group.position
       const dx = tp.x - p.x
@@ -630,7 +733,7 @@ class BomberUnit extends TokenUnit {
       this.group.rotation.y = yaw
       this.combat.fireBolt(muzzle, vel.clone().normalize(), {
         damage: 24, team: this.team, from: this, speed: vel.length(), // 18→24: 50TPに見合う出力へ
-        explosive: { radius: 2.5 }, gravity: g, maxRange: 80,
+        explosive: { radius: 2.0 }, gravity: g, maxRange: 80, // 2.5→2.0: 範囲制圧の過剰を是正
         color: this.team === 'blue' ? 0x6ec8ff : 0xff8a78, size: 0.16,
       })
       this.sfx.shotFar(0.12)
@@ -643,11 +746,13 @@ class BomberUnit extends TokenUnit {
 class JammerUnit extends TokenUnit {
   constructor(world: World, combat: Combat, sfx: Sfx, team: Team, pos: THREE.Vector3) {
     super(world, combat, sfx, team, 'jammer', 'ジャマーポッド', resolveModel('token_jammer', team, () => buildJammer(team)), pos, 70, 0.4, 1.1)
+    this.activeT = 0.9 // 起動まで0.9秒は妨害無効(armed=falseでworld側がゲート)
   }
 
   update(dt: number) {
     this.updateFlash(dt)
-    this.group.rotation.y += dt * 1.4
+    if (this.activeT > 0) this.activeT -= dt
+    this.group.rotation.y += dt * (this.armed ? 1.4 : 0.5) // 起動後は速く回って稼働を示す
     this.group.updateMatrixWorld()
   }
 }
@@ -663,10 +768,12 @@ class SniperDroneUnit extends TokenUnit {
     super(world, combat, sfx, team, 'sniperdrone', 'スナイパードローン', resolveModel('token_sniperdrone', team, () => buildSniperDrone(team)), pos, 35, 0.35, 0.6)
     this.home = pos.clone()
     this.group.position.y = 3.2
+    this.activeT = 1.0
   }
 
   update(dt: number) {
     this.updateFlash(dt)
+    if ((this.activeT -= dt) > 0) { this.group.position.y = 3.2; this.group.updateMatrixWorld(); return } // 起動ディレイ
     this.fireCd -= dt
     this.retargetT -= dt
     const p = this.group.position
@@ -675,7 +782,7 @@ class SniperDroneUnit extends TokenUnit {
     p.z = this.home.z + Math.sin(this.world.time * 0.7) * 1.2
     if (this.retargetT <= 0) {
       this.retargetT = 0.5
-      this.target = this.findTarget(45, 0)
+      this.target = this.findTarget(38, 0) // 45→38: 設置位置から盤面の要所だけを狙える射程に
     }
     const t = this.target
     if (t && t.alive && !t.stealthed) {
@@ -714,60 +821,62 @@ export class DecoyUnit extends TokenUnit {
   }
 }
 
+// トークンは「盤面制圧の道具」。プレイヤー級の対人戦闘力は持たせず、占領支援/かく乱/迎撃に役割分担する。
+// 起動ディレイ・対将ダメ減・追尾上限などで、設置位置を読み合う戦略ゲームに寄せる。
 export const TOKENS: Record<string, TokenDef> = {
   gunner: {
     key: 'gunner', name: 'ガンナー', cost: 30, maxActive: 3,
-    desc: '歩兵。索敵射撃、いなければ敵将へ進軍。',
+    desc: '占領支援。スフィアへ前進し占領を供給。近接の敵トークンと撃ち合う(対将は弱い)。',
     spawn: (w, c, s, t, p) => new GunnerUnit(w, c, s, t, p),
   },
   sentry: {
     key: 'sentry', name: 'セントリー', cost: 50, maxActive: 2,
-    desc: '固定砲台。射程26mの高DPS。',
+    desc: '迎撃砲台。射程26mで侵入トークンを撃ち落とす固定防衛。',
     spawn: (w, c, s, t, p) => new SentryUnit(w, c, s, t, p),
   },
   healer: {
     key: 'healer', name: 'ヒールドローン', cost: 40, maxActive: 1,
-    desc: '自将に追従して回復し続ける。',
+    desc: '占領支援。スフィア直下を低空で回り占領供給+近くの味方トークンを回復。低空=撃墜可。',
     spawn: (w, c, s, t, p) => new HealDroneUnit(w, c, s, t, p),
   },
   striker: {
     key: 'striker', name: 'ストライカー', cost: 45, maxActive: 2,
-    desc: '敵将へ突撃して接触自爆(55dmg)。',
+    desc: '突撃自爆。敵へ突進し接触自爆(48dmg)。至近で2秒振り切れば自滅。',
     spawn: (w, c, s, t, p) => new StrikerUnit(w, c, s, t, p),
   },
   mine: {
     key: 'mine', name: 'スパイダーマイン', cost: 35, maxActive: 3,
-    desc: '徘徊地雷。近づいた敵を追尾自爆(75dmg)。',
+    desc: '徘徊地雷。近づいた敵を追尾自爆(52dmg)。3秒で振り切れる。',
     spawn: (w, c, s, t, p) => new SpiderMineUnit(w, c, s, t, p),
   },
   wallpod: {
-    key: 'wallpod', name: 'ウォールポッド', cost: 35, maxActive: 2,
-    desc: '幅3mの遮蔽壁を展開。射線とAI経路を塞ぐ。',
+    key: 'wallpod', name: 'ウォールポッド', cost: 40, maxActive: 2,
+    desc: '遮蔽壁を展開(1秒)。射線とAI経路を塞ぎ占領ラインを作る。',
     spawn: (w, c, s, t, p, d) => new WallPodUnit(w, c, s, t, p, d),
   },
   booster: {
     key: 'booster', name: 'ブースターパイロン', cost: 40, maxActive: 1,
-    desc: '半径10mの味方トークンの連射+30%。',
+    desc: '半径10mの味方トークンの連射+20%。占領圏の手数を底上げ。',
     spawn: (w, c, s, t, p) => new BoosterUnit(w, c, s, t, p),
   },
   chaser: {
     key: 'chaser', name: 'チェイサー', cost: 35, maxActive: 2,
-    desc: '犬型。敵将を追跡し、接触で12dmg+5秒マップ表示。',
+    desc: '偵察犬。敵将を追跡、接触で12dmg+5秒マップ表示。近接でステルスを暴く。',
     spawn: (w, c, s, t, p) => new ChaserUnit(w, c, s, t, p),
   },
   bomber: {
-    key: 'bomber', name: 'ボムスリンガー', cost: 50, maxActive: 1,
-    desc: '曲射砲台。遮蔽越しに爆発弾(18dmg)を撃ち込む。',
+    key: 'bomber', name: 'ボムスリンガー', cost: 45, maxActive: 1,
+    desc: '曲射砲台。遮蔽越しに爆発弾(24dmg)。占領圏の面制圧に。',
     spawn: (w, c, s, t, p) => new BomberUnit(w, c, s, t, p),
   },
   jammer: {
-    key: 'jammer', name: 'ジャマーポッド', cost: 40, maxActive: 1,
-    desc: '半径9mの敵トークンの索敵距離を半減。',
+    key: 'jammer', name: 'ジャマーポッド', cost: 35, maxActive: 1,
+    desc: '半径9mの敵トークンの索敵を半減。敵の占領網をかく乱。',
     spawn: (w, c, s, t, p) => new JammerUnit(w, c, s, t, p),
   },
   sniperdrone: {
-    key: 'sniperdrone', name: 'スナイパードローン', cost: 50, maxActive: 1,
-    desc: '浮遊狙撃機。射程45m・18dmg。脆い。',
+    key: 'sniperdrone', name: 'スナイパードローン', cost: 45, maxActive: 1,
+    desc: '浮遊狙撃機。射程38m・18dmg。要所の敵トークンを点で潰す。脆い。',
     spawn: (w, c, s, t, p) => new SniperDroneUnit(w, c, s, t, p),
   },
 }

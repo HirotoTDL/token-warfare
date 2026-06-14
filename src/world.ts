@@ -215,8 +215,8 @@ export class World {
   /** ブースターパイロン圏内なら連射クールダウン倍率(<1で強化) */
   fireBoostMul(team: Team, pos: THREE.Vector3): number {
     for (const u of this.units) {
-      if (u.alive && u.team === team && u.kind === 'booster') {
-        if (u.group.position.distanceTo(pos) < 10) return 0.7
+      if (u.alive && u.team === team && u.kind === 'booster' && u.armed !== false) {
+        if (u.group.position.distanceTo(pos) < 10) return 0.833 // 連射+20%(旧0.7=+30%。対人DPS上限是正)
       }
     }
     return 1
@@ -225,7 +225,7 @@ export class World {
   /** 敵ジャマー圏内なら索敵距離倍率(<1で妨害) */
   senseRangeMul(team: Team, pos: THREE.Vector3): number {
     for (const u of this.units) {
-      if (u.alive && u.team !== team && u.kind === 'jammer') {
+      if (u.alive && u.team !== team && u.kind === 'jammer' && u.armed !== false) {
         if (u.group.position.distanceTo(pos) < 9) return 0.5
       }
     }

@@ -23,6 +23,8 @@ export interface Unit {
   hitMeshes: THREE.Mesh[]
   radius: number
   height: number
+  /** 起動済みか(トークンのみ。起動ディレイ中はfalse=オーラ/効果が無効。将はundefined=常時有効扱い) */
+  armed?: boolean
   update(dt: number): void
   takeDamage(amount: number, from: Unit | null): void
 }
