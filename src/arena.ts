@@ -416,8 +416,20 @@ export function buildArena(world: World, mapKey = 'skyhaven') {
     applyExtTexture(deckMat, 'tex_deck', [3, 3])
     applyExtTexture(stepMat, 'tex_step', [2, 1])
     // 床から topY までの箱。上面に乗れる(プレイヤー)。
+    const goldTrim = new THREE.MeshStandardMaterial({ color: 0xf2c75a, emissive: 0x6b5316, emissiveIntensity: 0.35, metalness: 0.9, roughness: 0.3 })
+    const fasciaMat = new THREE.MeshStandardMaterial({ color: 0xaeb9cc, roughness: 0.55, metalness: 0.35 })
+    applyExtTexture(fasciaMat, 'tex_cream_gold_molding', [3, 1])
     const platform = (cx: number, cz: number, w: number, d: number, topY: number, mat = deckMat) => {
       solid(new THREE.BoxGeometry(w, topY, d), mat, cx, topY / 2, cz, aabb(cx, cz, w, topY, d))
+      // 主要床(deckMat)は縁に張り出しコーニス(繰形)+金トリム線を回して建築的に仕上げる
+      if (mat === deckMat) {
+        const fascia = new THREE.Mesh(new THREE.BoxGeometry(w + 0.5, 0.34, d + 0.5), fasciaMat)
+        fascia.position.set(cx, topY - 0.2, cz); fascia.castShadow = true; fascia.receiveShadow = true
+        scene.add(fascia)
+        const line = new THREE.Mesh(new THREE.BoxGeometry(w + 0.56, 0.07, d + 0.56), goldTrim)
+        line.position.set(cx, topY - 0.02, cz)
+        scene.add(line)
+      }
     }
     // 高所の縁に置く胸壁(遮蔽)。baseYは床面の高さ。
     // 箱コライダーは残し、視覚はバラストレード(struct_railing)を長さに合わせて伸縮配置して差し替える。
