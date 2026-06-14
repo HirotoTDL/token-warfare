@@ -278,6 +278,12 @@ export class Combat {
       if (b.opts.gravity) b.mesh.lookAt(b.pos.clone().add(b.vel))
       const maxRange = b.opts.maxRange ?? 110
       if (b.traveled > maxRange || b.pos.y < -10) {
+        // 爆発弾がmaxRange到達(=届かず飛びすぎ)で消える場合は不発にせず着弾点で爆発させる。
+        // 場外へ落下(y<-10)した場合は虚空なので爆発しない(PHYS-08: 曲射の不発感を解消)。
+        if (b.opts.explosive && b.traveled > maxRange && b.pos.y > 0) {
+          const dmg = b.opts.damage * (b.opts.falloff ? falloffMul(b.opts.falloff, b.traveled) : 1)
+          this.explode(b.pos.clone(), b.opts.explosive.radius, dmg, b.opts.team, b.opts.from)
+        }
         this.killBolt(i)
       }
     }
