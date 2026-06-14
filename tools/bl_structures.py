@@ -290,8 +290,75 @@ def build_island():
         add('primitive_ico_sphere_add', FLOWER, radius=0.1, location=(rr * math.cos(ang), rr * math.sin(ang), 0.56), subdivisions=1)
 
 
+def build_fairytower():
+    # 自作の妖精塔: 繰形付き塔身 + アーチ窓(ブーリアン彫り+発光ガラス+金枠) + バルコニー欄干
+    #             + リブ付きドーム屋根 + 旋盤フィニアル + 巻きつくつる草と花
+    GLASS = solid_mat("glass", (0.6, 0.93, 1.0), 0.08, 0.0, emit=2.4)
+    VINE = solid_mat("vine", (0.42, 0.66, 0.38), 0.75)
+    FLW = solid_mat("flw", (1.0, 0.68, 0.84), 0.5, 0.0, emit=0.5)
+    DOORMAT = tex_mat("door", "tex_magic_wood_planks.png", 1.5, 0.55)
+    # --- 塔身(回転体。基部フレア→下層→バルコニー繰形→上層→軒) ---
+    body_prof = [
+        (0, 0), (1.55, 0), (1.55, 0.34), (1.28, 0.5), (1.34, 0.62), (1.14, 0.74),
+        (1.14, 2.85), (1.26, 2.96), (1.26, 3.22), (1.06, 3.36),
+        (1.0, 3.5), (0.9, 6.1), (1.02, 6.22), (1.02, 6.5), (0.84, 6.66), (0, 6.7),
+    ]
+    body = revolve(body_prof, STONE, 56, "tbody", 1)
+
+    def window(wz, R, ww, wh, ang, frame=GOLD):
+        # 穴は開けず、表面に窓ユニット(凹み暗パネル+発光ガラス+アーチ金枠)を貼る
+        cx, cy = math.cos(ang), math.sin(ang)
+        # 凹み暗パネル(窓枠の奥)
+        add('primitive_cube_add', solid_mat("rec", (0.2, 0.22, 0.28), 0.8), smooth=False, size=1.0, location=((R - 0.06) * cx, (R - 0.06) * cy, wz + wh * 0.15)); o = OBJS[-1]; o.scale = (0.05, ww * 1.05, wh * 1.1); o.rotation_euler = (0, 0, ang)
+        # 発光ガラス(矩形+アーチ上部)
+        add('primitive_cube_add', GLASS, smooth=False, size=1.0, location=(R * cx, R * cy, wz + wh * 0.15)); o = OBJS[-1]; o.scale = (0.05, ww * 0.88, wh * 1.0); o.rotation_euler = (0, 0, ang)
+        add('primitive_cylinder_add', GLASS, smooth=True, vertices=14, radius=ww * 0.86, depth=0.08, location=(R * cx, R * cy, wz + wh * 0.65), rotation=(0, math.radians(90), ang))
+        # 金アーチ枠(縦桟+アーチ)
+        for off in (-ww, ww):
+            add('primitive_cube_add', frame, smooth=False, size=1.0, location=((R + 0.02) * cx - off * math.sin(ang), (R + 0.02) * cy + off * math.cos(ang), wz + wh * 0.15)); o = OBJS[-1]; o.scale = (0.05, 0.04, wh * 1.05); o.rotation_euler = (0, 0, ang)
+        g = add('primitive_torus_add', frame, major_radius=ww * 0.95, minor_radius=0.04, location=((R + 0.02) * cx, (R + 0.02) * cy, wz + wh * 0.65), major_segments=20, minor_segments=8); g.rotation_euler = (0, math.radians(90), ang)
+
+    for k in range(6):
+        window(1.55, 1.16, 0.5, 0.9, k / 6 * math.tau + 0.26)
+    for k in range(6):
+        window(4.7, 0.96, 0.42, 0.78, k / 6 * math.tau + 0.52)
+    # --- 玄関(表面ドアユニット) ---
+    da = 0.26
+    add('primitive_cube_add', solid_mat("drec", (0.18, 0.2, 0.26), 0.8), smooth=False, size=1.0, location=(1.5 * math.cos(da), 1.5 * math.sin(da), 0.66)); OBJS[-1].scale = (0.06, 0.62, 1.5); OBJS[-1].rotation_euler = (0, 0, da)
+    add('primitive_cube_add', DOORMAT, smooth=False, size=1.0, location=(1.54 * math.cos(da), 1.54 * math.sin(da), 0.6)); OBJS[-1].scale = (0.05, 0.5, 1.28); OBJS[-1].rotation_euler = (0, 0, da)
+    add('primitive_cylinder_add', DOORMAT, smooth=True, vertices=16, radius=0.5, depth=0.1, location=(1.54 * math.cos(da), 1.54 * math.sin(da), 1.22), rotation=(0, math.radians(90), da))
+    gd = add('primitive_torus_add', GOLD, major_radius=0.52, minor_radius=0.04, location=(1.56 * math.cos(da), 1.56 * math.sin(da), 1.22), major_segments=20, minor_segments=8); gd.rotation_euler = (0, math.radians(90), da)
+    # --- 帯状の金モールディング(ストリングコース) ---
+    for z, rr in [(0.7, 1.18), (3.1, 1.28), (6.35, 1.04)]:
+        add('primitive_torus_add', GOLD, major_radius=rr, minor_radius=0.05, location=(0, 0, z), major_segments=56, minor_segments=10)
+    # --- バルコニー(繰形リング床 + ミニ欄干) ---
+    add('primitive_cylinder_add', MARBLE, smooth=False, vertices=40, radius=1.5, depth=0.12, location=(0, 0, 3.32)); OBJS[-1].data.materials[0] = MARBLE
+    for k in range(20):
+        ang = k / 20 * math.tau
+        add('primitive_cylinder_add', MARBLE, smooth=True, vertices=8, radius=0.05, depth=0.42, location=(1.44 * math.cos(ang), 1.44 * math.sin(ang), 3.6))
+    add('primitive_torus_add', GOLD, major_radius=1.44, minor_radius=0.04, location=(0, 0, 3.82), major_segments=48, minor_segments=8)
+    # --- ドーム屋根(リブ付き) + フィニアル ---
+    dome_prof = [(0, 6.55), (1.05, 6.6), (1.5, 6.5), (1.2, 7.1), (0.7, 7.7), (0.28, 8.1), (0, 8.2)]
+    revolve(dome_prof, ROOFTILE, 48, "dome", 1)
+    add('primitive_torus_add', GOLD, major_radius=1.5, minor_radius=0.08, location=(0, 0, 6.5), major_segments=48, minor_segments=10)
+    # ドーム頂部の小リング(リブ起点)
+    add('primitive_torus_add', GOLD, major_radius=0.32, minor_radius=0.05, location=(0, 0, 7.95), major_segments=24, minor_segments=8)
+    fin = revolve([(0, 8.0), (0.22, 8.1), (0.1, 8.35), (0.26, 8.55), (0.08, 8.9), (0, 9.1)], GOLD, 24, "finial", 1)
+    add('primitive_ico_sphere_add', CRYST, radius=0.26, location=(0, 0, 9.2), subdivisions=2)
+    # --- 巻きつくつる草(螺旋)と花 ---
+    for s in range(2):
+        for t in range(46):
+            tt = t / 46.0
+            ang = tt * math.tau * 2.4 + s * math.pi
+            rr = 1.16 - tt * 0.24
+            z = 0.5 + tt * 5.4
+            add('primitive_ico_sphere_add', VINE, smooth=True, radius=0.07, location=(rr * math.cos(ang), rr * math.sin(ang), z), subdivisions=1)
+            if t % 6 == 0:
+                add('primitive_ico_sphere_add', FLW, smooth=True, radius=0.06, location=((rr + 0.05) * math.cos(ang), (rr + 0.05) * math.sin(ang), z), subdivisions=1)
+
+
 BUILDERS = {'pillar': build_pillar, 'gate': build_gate, 'obelisk': build_obelisk, 'brazier': build_brazier,
-            'canopy': build_canopy, 'railing': build_railing, 'island': build_island}
+            'canopy': build_canopy, 'railing': build_railing, 'island': build_island, 'fairytower': build_fairytower}
 BUILDERS[kind]()
 
 bpy.ops.object.select_all(action='DESELECT')

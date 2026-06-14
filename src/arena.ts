@@ -864,6 +864,10 @@ export function buildArena(world: World, mapKey = 'skyhaven') {
       // ルーンオベリスク(プレイ縁の対角に屹立するランドマーク)
       ['struct_obelisk', edge * 0.7, -edge * 0.7, 1.6],
       ['struct_obelisk', -edge * 0.7, edge * 0.7, 1.6],
+      // 自作の妖精塔(ローカルBlender製。縁の主要ランドマーク)
+      ['struct_fairytower', -edge * 0.5, edge, 1.2],
+      ['struct_fairytower', edge * 0.5, -edge, 1.2],
+      ['struct_fairytower', edge, edge * 0.45, 1.0],
     ]
     for (const [key, x, z, sc] of placements) {
       let placed = false
