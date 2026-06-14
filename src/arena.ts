@@ -707,7 +707,6 @@ export function buildArena(world: World, mapKey = 'skyhaven') {
   // --- 遠景: 広大な世界を示す大型オブジェクト群(空気遠近でフォグに溶ける) ---
   const landMat = new THREE.MeshStandardMaterial({ color: crystal ? 0x9fb8d4 : dusk ? 0x6a5a7e : 0x8aa6c4, roughness: 0.96 })
   const foliMat = new THREE.MeshStandardMaterial({ color: crystal ? 0xaadbe6 : dusk ? 0x4f7060 : 0x74bd92, roughness: 0.95 })
-  const trunkMat = new THREE.MeshStandardMaterial({ color: dusk ? 0x6a5340 : 0x8a6a52, roughness: 1 })
   const floaters: { g: THREE.Group; phase: number; amp: number }[] = []
 
   // 大型浮遊島のリング(空に世界が続く印象。様々な高さ・大きさ)
@@ -728,20 +727,28 @@ export function buildArena(world: World, mapKey = 'skyhaven') {
     floaters.push({ g, phase: i * 1.5, amp: 0.8 + (i % 3) * 0.6 })
   }
 
-  // 巨大樹(プレイ外周。広大な森の縁にいる印象)
-  for (let i = 0; i < 9; i++) {
-    const a = (i / 9) * Math.PI * 2 + 0.9
-    const r = 72 + (i % 3) * 24
-    const h = 26 + ((i * 7) % 22)
+  // 巨大樹(プレイ外周。Tripo製の3D大樹で森の縁を表現。未ロード時は遅延配置)
+  for (let i = 0; i < 11; i++) {
+    const a = (i / 11) * Math.PI * 2 + 0.9
+    const r = 70 + (i % 3) * 26 + ((i * 13) % 18)
     const x = Math.cos(a) * r
     const z = Math.sin(a) * r
-    const trunk = new THREE.Mesh(new THREE.CylinderGeometry(h * 0.06, h * 0.13, h, 7), trunkMat)
-    trunk.position.set(x, h / 2, z)
-    trunk.castShadow = true
-    const crown = new THREE.Mesh(new THREE.SphereGeometry(h * 0.44, 8, 7), foliMat)
-    crown.position.set(x, h * 0.95, z)
-    crown.scale.y = 1.2
-    scene.add(trunk, crown)
+    const sc = 0.85 + ((i * 7) % 10) / 10
+    const key = i % 2 ? 'prop_tree2' : 'prop_tree'
+    let done = false
+    const tryTree = () => {
+      if (done) return
+      const g = getScenery(key)
+      if (!g) return
+      done = true
+      g.position.set(x, -0.1, z)
+      g.scale.multiplyScalar(sc)
+      g.rotation.y = a * 1.3
+      g.traverse((o) => { const m = o as THREE.Mesh; if (m.isMesh) { m.castShadow = true; m.receiveShadow = true } })
+      scene.add(g)
+    }
+    tryTree()
+    if (!done) updates.push(() => tryTree())
   }
 
   // 遠方の山/丘の影(地平を埋め、世界の果てを霞ませる)
