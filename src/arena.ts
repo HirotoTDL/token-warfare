@@ -712,6 +712,16 @@ export function buildArena(world: World, mapKey = 'skyhaven', lite = false) {
       placeProp('prop_chest', -10, -18, 1.0, 2.0, { collide: 1.1 })
       placeProp('prop_flowercart', 23, 21, 1.0, 2.4)
       placeProp('prop_flowercart', -23, -21, 1.0, 0.6)
+      // --- 街路化: フランクレーン外縁に妖精の家を並べて「通り」の壁を作る(点対称・コライダー=カバー兼建築) ---
+      placeProp('struct_house', 22, 8, 1.15, -Math.PI / 2, { collide: 3.6 })
+      placeProp('struct_house', -22, -8, 1.15, Math.PI / 2, { collide: 3.6 })
+      placeProp('struct_house', 21, -18, 1.0, -Math.PI / 2 - 0.35, { collide: 3.2 })
+      placeProp('struct_house', -21, 18, 1.0, Math.PI / 2 - 0.35, { collide: 3.2 })
+      // 通りを照らすランタン列(導線=自陣→中央を光で誘導。点対称) ---
+      placeProp('prop_lamp', 12, 7, 1.0, 0, { light: 0xffcf86 })
+      placeProp('prop_lamp', -12, -7, 1.0, 0, { light: 0xffcf86 })
+      placeProp('prop_lamp', 13, 25, 1.0, 0, { light: 0xffcf86 })
+      placeProp('prop_lamp', -13, -25, 1.0, 0, { light: 0xffcf86 })
     }
     }
 
