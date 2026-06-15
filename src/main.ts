@@ -424,10 +424,12 @@ class BattleView implements View {
       rc.attach(net.transport) // 'input'チャンネルで相手の操作を受信
       this.bot = rc
       this.world.addUnit(this.bot)
-      // 自軍(青=ホスト側)の発射をクライアントへ中継→相手画面に弾が見える(赤=client自機分は予測描画なので除外)
+      // 発射を全てクライアントへ中継→相手画面に弾が見える。
+      // 唯一の例外=クライアント自機将(=このRemoteCommander rc)の弾。これはクライアント側でローカル予測描画するため、
+      // 中継すると二重描画になる。それ以外(ホスト青将/青トークン/クライアントが配備した赤トークン)は全てpuppet扱いなので中継して見せる。
       this.combat.onFire = (o, d, opts) => {
-        if (opts.team !== 'blue') return
-        net.transport.send('event', { type: 'fire', ox: +o.x.toFixed(2), oy: +o.y.toFixed(2), oz: +o.z.toFixed(2), dx: +d.x.toFixed(3), dy: +d.y.toFixed(3), dz: +d.z.toFixed(3), col: opts.color, sp: opts.speed, sz: opts.size, ex: opts.explosive?.radius, gr: opts.gravity })
+        if (opts.from === rc) return
+        net.transport.send('event', { type: 'fire', ox: +o.x.toFixed(2), oy: +o.y.toFixed(2), oz: +o.z.toFixed(2), dx: +d.x.toFixed(3), dy: +d.y.toFixed(3), dz: +d.z.toFixed(3), col: opts.color, sp: opts.speed, sz: opts.size, ex: opts.explosive?.radius, gr: opts.gravity, tm: opts.team })
       }
     } else if (this.isClient) {
       // クライアント: 権威simを持たない。自機は赤陣営(host=青)。相手将/トークンはスナップショットでpuppet描画。
@@ -442,11 +444,11 @@ class BattleView implements View {
       net!.transport.onMessage((ch, data: any) => {
         if (ch === 'state') this.lastSnap = data as Snapshot
         else if (ch === 'event' && data && data.type === 'fire') {
-          // ホストから来た青(相手)の発射を視覚弾として再生(ダメージはホスト権威=snapshotのHPで反映)
+          // ホストから来た発射(相手将/双方トークン)を視覚弾として再生(ダメージはホスト権威=snapshotのHPで反映)
           this.combat.fireBolt(
             new THREE.Vector3(data.ox, data.oy, data.oz),
             new THREE.Vector3(data.dx, data.dy, data.dz),
-            { damage: 0, team: 'blue', from: null, speed: data.sp ?? 130, color: data.col, size: data.sz, explosive: data.ex ? { radius: data.ex } : undefined, gravity: data.gr, visual: true },
+            { damage: 0, team: data.tm ?? 'blue', from: null, speed: data.sp ?? 130, color: data.col, size: data.sz, explosive: data.ex ? { radius: data.ex } : undefined, gravity: data.gr, visual: true },
           )
           sfx.shotFar(0.1)
         } else if (ch === 'event' && data && data.type === 'matchEnd') {
@@ -1298,6 +1300,17 @@ window.addEventListener('resize', () => {
     c.send('event', { type: 'deploy', key: 'gunner', x: 0, z: -5 })
     for (let f = 0; f < 12; f++) { host.update(1 / 60); client.update(1 / 60) }
     const deploySpawnedToken = host.world.units.filter((u) => u.team === 'red' && !u.isCommander).length > hostRedTokBefore
+    // 自軍(赤)トークン弾の中継: クライアントが配備した赤トークンの発射も相手(ホスト)→クライアントへ中継され視覚弾になる
+    const redTok = host.world.units.find((u) => u.team === 'red' && !u.isCommander)
+    const relayBefore = fireEvents
+    if (redTok) hc.fireBolt(redTok.group.position.clone(), new THREE.Vector3(0, 0, 1), { damage: 10, team: 'red', from: redTok, speed: 130, size: 0.09 })
+    for (let f = 0; f < 6; f++) { host.update(1 / 60); client.update(1 / 60) }
+    const redTokenBoltRelayed = fireEvents > relayBefore
+    // 自機将(クライアント本人=RemoteCommander)の弾は中継しない(クライアント側でローカル予測描画→二重描画回避)
+    const ownBefore = fireEvents
+    hc.fireBolt(new THREE.Vector3(0, 1.5, 0), new THREE.Vector3(0, 0, 1), { damage: 10, team: 'red', from: host.bot, speed: 130, size: 0.09 })
+    for (let f = 0; f < 6; f++) { host.update(1 / 60); client.update(1 / 60) }
+    const ownCommanderBoltNotRelayed = fireEvents === ownBefore
     // スキル同期: クライアントがスキル発動→ホストのRemoteCommanderが権威適用(skillCdが立つ)
     c.send('event', { type: 'skill' })
     for (let f = 0; f < 4; f++) { host.update(1 / 60); client.update(1 / 60) }
@@ -1325,10 +1338,12 @@ window.addEventListener('resize', () => {
       clientVisualBolts, // ホスト発射が視覚弾としてクライアントに再生された数(>0期待)
       peakClientBolts, // 同時に飛んでいたクライアント視覚弾のピーク
       deploySpawnedToken, // クライアント配備要求→ホストがトークンspawn(true期待)
+      redTokenBoltRelayed, // 自軍(赤)トークンの弾も相手画面に中継される(true期待)
+      ownCommanderBoltNotRelayed, // 自機将の弾は中継しない=二重描画回避(true期待)
       skillActivated, // クライアントのスキル発動→ホストが権威適用(true期待)
       matchEndSynced, // ホストの終了通知→クライアントも終了(true期待)
       clientCombatFeedback: { dealt: Math.round(client.stats.dmgDealt), taken: Math.round(client.stats.dmgTaken) }, // 相手被弾→dealt, 自機被弾→taken(両>0期待)
-      ok: snapsSeen > 0 && puppetCount > 0 && clientVisualBolts > 0 && deploySpawnedToken && skillActivated && matchEndSynced && client.stats.dmgDealt > 0 && client.stats.dmgTaken > 0,
+      ok: snapsSeen > 0 && puppetCount > 0 && clientVisualBolts > 0 && deploySpawnedToken && redTokenBoltRelayed && ownCommanderBoltNotRelayed && skillActivated && matchEndSynced && client.stats.dmgDealt > 0 && client.stats.dmgTaken > 0,
     } as any
     // 切断ハンドリング検証: クライアント切断→両者のマッチがover(フリーズしない)
     c.close()
