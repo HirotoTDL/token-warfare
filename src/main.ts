@@ -25,8 +25,9 @@ import { DamagePopups } from './dmgpop'
 import { PostFX } from './postfx'
 import { LoopbackTransport, type NetTransport, type NetRole } from './net/transport'
 import { RemoteCommander } from './net/remoteCommander'
-import type { NetInput } from './net/netInput'
+import { sampleNetInput, type NetInput } from './net/netInput'
 import { WebRtcTransport } from './net/webrtcTransport'
+import { encodeSnapshot, PuppetManager, type Snapshot } from './net/snapshot'
 import { RoomEnvironment } from 'three/examples/jsm/environments/RoomEnvironment.js'
 
 // --- 基盤 ---
@@ -345,8 +346,17 @@ class BattleView implements View {
   world = new World()
   camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.08, 1200)
   player: PlayerCommander
-  bot: BotCommander
+  bot!: BotCommander | RemoteCommander // オフライン=AI将, オンラインhost=リモート将。client=未生成(相手はpuppet)
   hud: HUD
+  // --- オンライン対戦(P2Pホスト権威) ---
+  private net: { transport: NetTransport; role: NetRole; oppCharKey: string } | null = null
+  private isHost = false
+  private isClient = false
+  private puppets: PuppetManager | null = null // client: 相手/トークンを見た目だけ再現
+  private snapAcc = 0 // host: スナップショット送信間隔の累積
+  private inSeq = 0 // client: 入力連番
+  private lastSnap: Snapshot | null = null // client: 直近受信スナップ(未適用)
+  private snapInterp = 0 // client: 受信間の補間進捗
   over = false
   everLocked = false
   timer = MATCH_TIME
@@ -381,7 +391,14 @@ class BattleView implements View {
     }
   }
 
-  constructor(public config: MatchConfig, private onEnd: (scores: Record<Team, number>) => void) {
+  constructor(
+    public config: MatchConfig,
+    private onEnd: (scores: Record<Team, number>) => void,
+    net: { transport: NetTransport; role: NetRole; oppCharKey: string } | null = null,
+  ) {
+    this.net = net
+    this.isHost = net?.role === 'host'
+    this.isClient = net?.role === 'client'
     this.arena = buildArena(this.world, config.mapKey)
     this.sky = createSky(this.world.scene, this.arena.sunDir, (this.arena as any).dusk ? SKY_DUSK : SKY_DAY)
     this.world.scene.environment = envTex
@@ -400,8 +417,25 @@ class BattleView implements View {
 
     this.player = new PlayerCommander(this.world, this.combat, sfx, input, char, this.world.basePos.blue, this.camera)
     this.world.addUnit(this.player)
-    this.bot = new BotCommander(this.world, this.combat, sfx, botChar, this.world.basePos.red, botParams(config.botLevel))
-    this.world.addUnit(this.bot)
+    if (this.isHost && net) {
+      // ホスト権威: 相手将は受信入力で駆動するRemoteCommander(AIの代わり)。これがオンライン対戦の敵。
+      const opp = characterByKey(net.oppCharKey)
+      const rc = new RemoteCommander(this.world, this.combat, sfx, opp, 'red', this.world.basePos.red)
+      rc.attach(net.transport) // 'input'チャンネルで相手の操作を受信
+      this.bot = rc
+      this.world.addUnit(this.bot)
+    } else if (this.isClient) {
+      // クライアント: 権威simを持たない。自機は赤陣営(host=青)。相手将/トークンはスナップショットでpuppet描画。
+      this.player.team = 'red'
+      this.player.respawn(this.world.basePos.red, 0) // 赤陣スポーンへ
+      this.puppets = new PuppetManager(this.world.scene)
+      this.puppets.setLocalCommanderTeam('red')
+      net!.transport.onMessage((ch, data) => { if (ch === 'state') this.lastSnap = data as Snapshot })
+    } else {
+      // オフライン(従来どおり): CPU将
+      this.bot = new BotCommander(this.world, this.combat, sfx, botChar, this.world.basePos.red, botParams(config.botLevel))
+      this.world.addUnit(this.bot)
+    }
 
     this.hud = new HUD(hudRoot, char, this.player.loadout.map((k) => TOKENS[k]))
     this.hud.minimap.buildStatic(this.world)
@@ -487,7 +521,7 @@ class BattleView implements View {
     this.world.cores.push({ pos, mesh, tp: small ? SMALL_CORE_TP : CORE_TP, small, life: small ? 20 : Infinity })
   }
 
-  private collectCore(core: Core, collector: PlayerCommander | BotCommander, behind: boolean) {
+  private collectCore(core: Core, collector: PlayerCommander | BotCommander | RemoteCommander, behind: boolean) {
     let tp = core.tp
     if (behind && !core.small) tp += CORE_TP_MOMENTUM_BONUS
     collector.tp = Math.min(100, collector.tp + tp)
@@ -548,6 +582,58 @@ class BattleView implements View {
     input.exitLock()
   }
 
+  /** ホスト: 20Hzで権威スナップショットを配信 */
+  private hostNetUpdate(dt: number) {
+    if (!this.net) return
+    this.snapAcc += dt
+    if (this.snapAcc < 0.05) return
+    this.snapAcc = 0
+    const o = this.objectives
+    const snap = encodeSnapshot(
+      this.world.units,
+      [o.center.charge, o.base.blue.charge, o.base.red.charge],
+      [this.scores.blue, this.scores.red],
+      this.timer,
+      this.t,
+    )
+    this.net.transport.send('state', snap)
+  }
+
+  /** クライアント: 自機入力を送信し、受信スナップショットを反映(権威simは持たない) */
+  private clientNetUpdate(_dt: number) {
+    if (!this.net) return
+    // 1) 自機入力をホストへ(ホストのRemoteCommanderが駆動)
+    this.net.transport.send('input', sampleNetInput(input, this.player.yaw, this.player.pitch, this.inSeq++))
+    // 2) 受信スナップショットを権威として適用
+    const snap = this.lastSnap
+    if (!snap) return
+    this.lastSnap = null
+    this.snapInterp = 0
+    this.puppets?.ingest(snap)
+    this.scores.blue = snap.score[0]
+    this.scores.red = snap.score[1]
+    this.timer = snap.timer
+    // スフィアの見た目をchargeで反映(視覚のみ)
+    const o = this.objectives
+    o.center.charge = snap.spheres[0]; o.base.blue.charge = snap.spheres[1]; o.base.red.charge = snap.spheres[2]
+    for (const s of o.spheres) s.update(_dt)
+    // 自機(赤将)の権威状態を反映(HP/生存)＋大きくドリフトしたら位置を引き戻す
+    const me = snap.units.find((u) => u.kind === 'commander' && u.team === 'red')
+    if (me) {
+      this.player.hp = me.hp
+      this.player.maxHp = me.mhp
+      if (!me.alive && this.player.alive) this.player.alive = false
+      else if (me.alive && !this.player.alive) this.player.respawn(this.world.basePos.red, RESPAWN_INVULN)
+      const drift = Math.hypot(this.player.pos.x - me.x, this.player.pos.z - me.z)
+      if (drift > 3) this.player.pos.set(me.x, this.player.pos.y, me.z)
+    }
+    // 勝敗(ホスト権威): カウント到達で終了
+    if (!this.over && (snap.score[0] >= CAPTURE_TO_WIN || snap.score[1] >= CAPTURE_TO_WIN)) {
+      this.hud.killBanner(snap.score[1] > snap.score[0] ? '勝利!' : '敗北…', snap.score[1] > snap.score[0])
+      this.finish()
+    }
+  }
+
   update(dt: number) {
     const paused = this.everLocked && !input.locked && !this.over && this.player.alive
     resumeOverlay.classList.toggle('hidden', !paused)
@@ -557,7 +643,10 @@ class BattleView implements View {
     this.arena.update(dt, this.t)
     if (paused) return
 
-    if (!this.over) {
+    // クライアントは権威simを持たない: 入力送信＋受信スナップショット適用(スコア/タイマー/相手puppet/自機補正)
+    if (this.isClient) this.clientNetUpdate(dt)
+
+    if (!this.over && !this.isClient) {
       // スフィア占領カウント更新(中央＋敵陣を確保している側が加算)
       const obj = this.objectives.update(dt)
       this.scores.blue = Math.floor(this.objectives.count.blue)
@@ -671,6 +760,9 @@ class BattleView implements View {
     this.fx.update(udt)
     this.combat.update(udt)
     this.popups.update(udt)
+    // クライアント: 相手/トークンpuppetを受信間で補間。ホスト: 20Hzでスナップショット配信。
+    if (this.isClient && this.puppets) { this.snapInterp = Math.min(1, this.snapInterp + dt * 12); this.puppets.update(this.snapInterp) }
+    if (this.isHost) this.hostNetUpdate(dt)
 
     if (!this.over) {
       this.hud.update(
@@ -742,18 +834,21 @@ input.onLockChange = (locked) => {
   if (locked) resumeOverlay.classList.add('hidden')
 }
 
-function startBattle(charKey: string) {
+function startBattle(charKey: string, net: { transport: NetTransport; role: NetRole; oppCharKey: string } | null = null) {
   lastChar = charKey
   view.dispose()
+  const myTeam: Team = net?.role === 'client' ? 'red' : 'blue' // オンラインclientは赤陣営
   battle = new BattleView(
     { charKey, botLevel: pendingMode.botLevel, practice: pendingMode.practice, mapKey: pendingMap },
     (scores) => {
-      const win = scores.blue > scores.red
-      const draw = scores.blue === scores.red
+      const mine = myTeam === 'blue' ? scores.blue : scores.red
+      const theirs = myTeam === 'blue' ? scores.red : scores.blue
+      const win = mine > theirs
+      const draw = mine === theirs
       const label = document.getElementById('result-label')!
       label.textContent = draw ? 'DRAW' : win ? 'WIN' : 'LOSE'
       label.className = draw ? 'draw' : win ? 'win' : 'lose'
-      document.getElementById('result-score')!.textContent = `${scores.blue} - ${scores.red}`
+      document.getElementById('result-score')!.textContent = `${mine} - ${theirs}`
       // 戦績詳細
       const b = battle!
       const acc = b.player.shotsFired > 0 ? Math.round((b.player.shotsHit / b.player.shotsFired) * 100) : 0
@@ -774,6 +869,7 @@ function startBattle(charKey: string) {
           : '盤面を立て直し、コアを制せ。'
       showScreen('result')
     },
+    net,
   )
   view = battle
   showScreen(null)
@@ -783,6 +879,10 @@ function startBattle(charKey: string) {
 }
 
 function backToMenu(target: 'title' | 'mode' | 'select') {
+  // オンライン対戦の後始末(トランスポートを閉じ、オフライン状態へ戻す)
+  if (pendingNet) { try { pendingNet.transport.close() } catch { /* noop */ } }
+  pendingNet = null
+  pendingNetSortie = null
   view.dispose()
   battle = null
   view = new MenuView()
@@ -808,6 +908,7 @@ for (const m of MAPS) {
 // モード選択
 document.getElementById('btn-versus')!.addEventListener('click', () => {
   sfx.unlock()
+  if (pendingNet) { try { pendingNet.transport.close() } catch {} pendingNet = null; pendingNetSortie = null } // オフライン入口: 残ったオンライン接続を破棄
   pendingMode = { botLevel: 6, practice: false }
   showScreen('select')
 })
@@ -819,6 +920,7 @@ for (let lv = 1; lv <= 10; lv++) {
   b.addEventListener('click', (e) => {
     e.stopPropagation()
     sfx.unlock()
+    if (pendingNet) { try { pendingNet.transport.close() } catch {} pendingNet = null; pendingNetSortie = null }
     pendingMode = { botLevel: lv, practice: true }
     showScreen('select')
   })
@@ -829,6 +931,7 @@ for (let lv = 1; lv <= 10; lv++) {
 // 部屋を作る=ホスト(権威)/合言葉で参加=クライアント。接続が確立したら pendingNet を立て、
 // キャラ選択→出撃でオンライン対戦を開始する(対戦本体の同期は PvP Phase2)。
 let pendingNet: { transport: NetTransport; role: NetRole } | null = null
+let pendingNetSortie: (() => void) | null = null // オンライン時の出撃(ready交換)。btn-sortieから呼ぶ
 const lobbyEl = {
   choice: document.getElementById('lobby-choice')!,
   status: document.getElementById('lobby-status')!,
@@ -854,20 +957,37 @@ function lobbyCleanup() {
   if (lobbyTransport && lobbyTransport.state !== 'open') lobbyTransport.close()
   lobbyTransport = null
 }
-/** 接続確立。pendingNetを保持。対戦本体(スナップショット同期)は PvP Phase2 で startOnlineBattle が担う。
- *  Phase1ではP2P接続の成立までを確認する(双方が hello を交換して疎通確認)。 */
+/** 接続確立 → キャラ選択へ。出撃時に ready{char,map} を交換し、双方揃ったらオンライン対戦を開始する。 */
 function onNetConnected(transport: NetTransport, role: NetRole) {
   pendingNet = { transport, role }
-  // 疎通確認: 双方が hello を送り合い、受信できたら接続を確証する
-  let peerHello = false
-  transport.onMessage((ch, data) => {
-    if (ch === 'event' && data && (data as any).hello) {
-      peerHello = true
-      lobbyShowStatus('P2P接続が確立しました！(' + (role === 'host' ? 'ホスト' : 'ゲスト') + ') 対戦の同期は次アップデート(Phase2)で実装します。')
+  let sentReady = false
+  let oppChar: string | null = null
+  let oppMap: string | null = null
+  let started = false
+  const tryStart = () => {
+    if (started || !sentReady || !oppChar) return
+    started = true
+    pendingNetSortie = null
+    if (role !== 'host' && oppMap) pendingMap = oppMap // ホストのマップに合わせる
+    startBattle(selectedChar.key, { transport, role, oppCharKey: oppChar })
+  }
+  // ready受信(相手の出撃)。出撃前に来ても保持してtryStartで合流する。
+  transport.onMessage((ch, data: any) => {
+    if (ch === 'event' && data && data.type === 'ready') {
+      oppChar = data.char
+      oppMap = data.map
+      tryStart()
     }
   })
-  transport.send('event', { hello: role })
-  setTimeout(() => { if (!peerHello) lobbyShowStatus('接続は開きましたが疎通確認待ちです(' + role + ')。') }, 1500)
+  // 出撃ボタン(btn-sortie)から呼ばれる: 自分のreadyを送って相手を待つ
+  pendingNetSortie = () => {
+    if (sentReady) return
+    sentReady = true
+    transport.send('event', { type: 'ready', char: selectedChar.key, map: pendingMap })
+    tryStart()
+  }
+  lobbyShowStatus('P2P接続が確立しました！コマンダーを選んで出撃。')
+  setTimeout(() => showScreen('select'), 600)
 }
 
 document.getElementById('btn-online')!.addEventListener('click', () => {
@@ -958,7 +1078,18 @@ CHARACTERS.forEach((c, idx) => {
   rosterThumbs.push(thumb)
 })
 
-document.getElementById('btn-sortie')!.addEventListener('click', () => { sfx.unlock(); startBattle(selectedChar.key) })
+document.getElementById('btn-sortie')!.addEventListener('click', () => {
+  sfx.unlock()
+  if (pendingNet && pendingNetSortie) {
+    pendingNetSortie() // オンライン: ready交換→双方揃ったら開始
+    const sortie = document.getElementById('btn-sortie')!
+    sortie.textContent = '相手を待っています…'
+    ;(sortie as HTMLButtonElement).disabled = true
+    setTimeout(() => { sortie.textContent = '出 撃'; (sortie as HTMLButtonElement).disabled = false }, 8000)
+  } else {
+    startBattle(selectedChar.key)
+  }
+})
 selectCharacter(CHARACTERS[0], 0) // 初期選択
 
 document.getElementById('btn-start')!.addEventListener('click', () => {
@@ -1091,6 +1222,37 @@ window.addEventListener('resize', () => {
       }).catch((e: any) => { clearTimeout(killer); fin({ status: 'join-failed', err: String(e) }) })
     }).catch((e: any) => { clearTimeout(killer); fin({ status: 'host-failed', err: String(e) }) })
     return 'started — poll window.__netTestResult'
+  },
+  // PvP Phase2検証: ループバックで host+client のBattleViewを作り、host sim→snapshot→client puppet を確認。
+  netMatchTest() {
+    const [h, c] = LoopbackTransport.pair(0)
+    const noop = () => {}
+    const host = new BattleView({ charKey: 'renji', botLevel: 6, practice: false, mapKey: 'skyhaven' }, noop, { transport: h, role: 'host', oppCharKey: 'mimi' })
+    const client = new BattleView({ charKey: 'mimi', botLevel: 6, practice: false, mapKey: 'skyhaven' }, noop, { transport: c, role: 'client', oppCharKey: 'renji' })
+    // ホスト青将を動かして、クライアント側puppetが追従するか見る
+    host.player.pos.set(5, 0, 10); host.player.group.position.copy(host.player.pos)
+    let snapsSeen = 0
+    const origIngest = (client as any).puppets.ingest.bind((client as any).puppets)
+    ;(client as any).puppets.ingest = (s: any) => { snapsSeen++; origIngest(s) }
+    for (let f = 0; f < 40; f++) { host.update(1 / 60); client.update(1 / 60) }
+    // クライアントのpuppet群(ホストの青将renji等)の位置を取得
+    const pm = (client as any).puppets
+    const puppetCount = (pm as any).puppets.size
+    // ホスト青将に対応するpuppetの位置(クライアント視点で敵=青将)
+    let bluePuppetPos: any = null
+    for (const [, p] of (pm as any).puppets) { bluePuppetPos = { x: +p.group.position.x.toFixed(1), z: +p.group.position.z.toFixed(1) }; break }
+    const r = {
+      snapsReceived: snapsSeen,
+      clientPuppetCount: puppetCount,
+      hostBluePos: { x: 5, z: 10 },
+      aBluePuppetPos: bluePuppetPos,
+      clientScores: client.scores,
+      hostScores: host.scores,
+      clientPlayerTeam: client.player.team,
+      ok: snapsSeen > 0 && puppetCount > 0,
+    }
+    host.dispose(); client.dispose()
+    return r
   },
 }
 
