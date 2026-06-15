@@ -449,6 +449,9 @@ class BattleView implements View {
             { damage: 0, team: 'blue', from: null, speed: data.sp ?? 130, color: data.col, size: data.sz, explosive: data.ex ? { radius: data.ex } : undefined, gravity: data.gr, visual: true },
           )
           sfx.shotFar(0.1)
+        } else if (ch === 'event' && data && data.type === 'matchEnd') {
+          // ホストがマッチ終了(占領達成/時間切れ/サドンデス)→クライアントも確定スコアで終了
+          if (!this.over) { this.scores.blue = data.score[0]; this.scores.red = data.score[1]; this.finish() }
         }
       })
     } else {
@@ -611,6 +614,8 @@ class BattleView implements View {
     sfx.sting(this.scores.blue >= this.scores.red)
     bgm.jingle(this.scores.blue === this.scores.red ? 'draw' : this.scores.blue > this.scores.red ? 'win' : 'lose')
     input.exitLock()
+    // ホスト権威: あらゆる終了条件(占領達成/時間切れ/サドンデス)をクライアントへ伝える(クライアントの取りこぼし防止)
+    if (this.isHost && this.net) this.net.transport.send('event', { type: 'matchEnd', score: [this.scores.blue, this.scores.red] })
   }
 
   /** ホスト: 20Hzで権威スナップショットを配信 */
@@ -632,7 +637,7 @@ class BattleView implements View {
 
   /** クライアント: 自機入力を送信し、受信スナップショットを反映(権威simは持たない) */
   private clientNetUpdate(_dt: number) {
-    if (!this.net) return
+    if (!this.net || this.over) return // 終了後は入力送信もsnapshot適用も止める(確定スコアが巻き戻らないように)
     // 1) 自機入力をホストへ(ホストのRemoteCommanderが駆動)
     this.net.transport.send('input', sampleNetInput(input, this.player.yaw, this.player.pitch, this.inSeq++))
     // 2) 受信スナップショットを権威として適用
@@ -1297,6 +1302,10 @@ window.addEventListener('resize', () => {
     c.send('event', { type: 'skill' })
     for (let f = 0; f < 4; f++) { host.update(1 / 60); client.update(1 / 60) }
     const skillActivated = (host.bot as any).skillCd > 0
+    // マッチ終了同期: ホストの終了通知(占領達成/時間切れ等)→クライアントも確定スコアで終了
+    h.send('event', { type: 'matchEnd', score: [30, 5] })
+    for (let f = 0; f < 4; f++) { host.update(1 / 60); client.update(1 / 60) }
+    const matchEndSynced = client.over === true && client.scores.blue === 30
     // クライアントのpuppet群(ホストの青将renji等)の位置を取得
     const pm = (client as any).puppets
     const puppetCount = (pm as any).puppets.size
@@ -1317,8 +1326,9 @@ window.addEventListener('resize', () => {
       peakClientBolts, // 同時に飛んでいたクライアント視覚弾のピーク
       deploySpawnedToken, // クライアント配備要求→ホストがトークンspawn(true期待)
       skillActivated, // クライアントのスキル発動→ホストが権威適用(true期待)
+      matchEndSynced, // ホストの終了通知→クライアントも終了(true期待)
       clientCombatFeedback: { dealt: Math.round(client.stats.dmgDealt), taken: Math.round(client.stats.dmgTaken) }, // 相手被弾→dealt, 自機被弾→taken(両>0期待)
-      ok: snapsSeen > 0 && puppetCount > 0 && clientVisualBolts > 0 && deploySpawnedToken && skillActivated && client.stats.dmgDealt > 0 && client.stats.dmgTaken > 0,
+      ok: snapsSeen > 0 && puppetCount > 0 && clientVisualBolts > 0 && deploySpawnedToken && skillActivated && matchEndSynced && client.stats.dmgDealt > 0 && client.stats.dmgTaken > 0,
     } as any
     // 切断ハンドリング検証: クライアント切断→両者のマッチがover(フリーズしない)
     c.close()
