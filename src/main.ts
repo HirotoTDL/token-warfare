@@ -1414,6 +1414,59 @@ window.addEventListener('resize', () => {
     host.dispose(); client.dispose()
     return r
   },
+  // PvP自機予測の精度検証: クライアントの自機はローカル予測(PlayerCommander)、ホストは権威(RemoteCommander)。
+  // 両者は同一移動モデルだが、ホストは入力を遅延後に適用する分だけ遅れる。その「予測ズレ」が
+  // スナップ補正閾値(3m)を大きく下回る=滑らかに一致し続けることを確認する(下回れば補正は発火しない=予測が良好)。
+  // 入力はモジュールグローバル`input`を一時操作して駆動し、終了時に必ず復元する。
+  netPredictTest(latencyMs = 80, jitterMs = 30) {
+    const [h, c] = LoopbackTransport.pair(latencyMs, true, jitterMs)
+    const noop = () => {}
+    const host = new BattleView({ charKey: 'renji', botLevel: 6, practice: false, mapKey: 'skyhaven' }, noop, { transport: h, role: 'host', oppCharKey: 'mimi' })
+    const client = new BattleView({ charKey: 'mimi', botLevel: 6, practice: false, mapKey: 'skyhaven' }, noop, { transport: c, role: 'client', oppCharKey: 'renji' })
+    // 自機(client赤)とホスト権威(host.bot=RemoteCommander赤)を同じ赤スポーンに揃える
+    const sp = host.world.basePos.red
+    const hb = host.bot as any // host時は RemoteCommander(.pos を持つ)
+    hb.pos.copy(sp); hb.group.position.copy(sp)
+    client.player.pos.copy(client.world.basePos.red)
+    const savedKeys = [...input.keys] // グローバル入力の復元用
+    const dtMs = 1000 / 60
+    let maxDrift = 0, finalDrift = 0, nanSeen = false, snapWouldFire = 0, samples = 0
+    try {
+      for (let f = 0; f < 300; f++) {
+        // 計測は「補正前」の予測ズレ(前フレーム終端の予測位置 vs 権威位置)。f>40で定常化後を見る。
+        if (f > 40) {
+          const cp = client.player.pos, ap = host.bot.group.position
+          const drift = Math.hypot(cp.x - ap.x, cp.z - ap.z)
+          if (isNaN(drift)) nanSeen = true
+          maxDrift = Math.max(maxDrift, drift); finalDrift = drift; samples++
+          if (drift > 3) snapWouldFire++ // 補正(3m超でスナップ)が発火する状況の回数
+        }
+        // 入力パターン: スポーン近傍の開けた地面で前後・左右に小さく往復(壁/コライダーを避ける)。yawは緩く振る。
+        input.keys.clear()
+        if ((f % 80) < 40) input.keys.add('KeyW'); else input.keys.add('KeyS')
+        if ((f % 120) < 60) input.keys.add('KeyD'); else input.keys.add('KeyA')
+        client.player.yaw = Math.sin(f / 90) * 0.4 // 緩い旋回(±0.4rad)。振幅小=往復範囲が狭く開けた範囲に留まる
+        host.update(1 / 60); client.update(1 / 60)
+        h.advance(dtMs); c.advance(dtMs)
+      }
+    } finally {
+      input.keys.clear(); for (const k of savedKeys) input.keys.add(k) // グローバル入力を必ず復元
+    }
+    const r: any = {
+      latencyMs,
+      jitterMs,
+      maxDriftM: +maxDrift.toFixed(3),     // 予測位置と権威位置の最大ズレ(m)。速度6×(遅延+α)程度に収まるはず(<1.5期待)
+      finalDriftM: +finalDrift.toFixed(3),
+      snapWouldFire,                       // 3m超スナップ補正が起きた回数(予測良好なら0期待)
+      samples,
+      noNaN: !nanSeen,
+      // 予測が締まっている: ズレがスナップ閾値3mを大きく下回り、補正が一度も要らない
+      predictionTight: !nanSeen && maxDrift < 1.5 && snapWouldFire === 0,
+    }
+    r.ok = r.predictionTight
+    host.dispose(); client.dispose()
+    return r
+  },
 }
 
 // --- メインループ ---
