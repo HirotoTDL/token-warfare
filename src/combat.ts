@@ -3,6 +3,24 @@ import { falloffMul, type FalloffPoint, type Team, type Unit } from './types'
 import { World } from './world'
 import { Sfx } from './sfx'
 
+// レイ(origin, 正規化dir)とAABBの交差距離を返す(区間[0,maxDist]の最初の交点。無交差は-1)。割り当て無しのスラブ法。
+// ユニットのヒット判定用: キャラはスキンドメッシュ(数十万tri)でmesh raycastが秒単位に激重なため、
+// pos/radius/heightのAABB(=カプセル相当の箱)で解析判定して桁違いに軽くする。
+function rayAabb(
+  ox: number, oy: number, oz: number, dx: number, dy: number, dz: number,
+  minx: number, miny: number, minz: number, maxx: number, maxy: number, maxz: number, maxDist: number,
+): number {
+  let t0 = 0
+  let t1 = maxDist
+  if (Math.abs(dx) < 1e-8) { if (ox < minx || ox > maxx) return -1 }
+  else { const inv = 1 / dx; let ta = (minx - ox) * inv; let tb = (maxx - ox) * inv; if (ta > tb) { const s = ta; ta = tb; tb = s } if (ta > t0) t0 = ta; if (tb < t1) t1 = tb; if (t0 > t1) return -1 }
+  if (Math.abs(dy) < 1e-8) { if (oy < miny || oy > maxy) return -1 }
+  else { const inv = 1 / dy; let ta = (miny - oy) * inv; let tb = (maxy - oy) * inv; if (ta > tb) { const s = ta; ta = tb; tb = s } if (ta > t0) t0 = ta; if (tb < t1) t1 = tb; if (t0 > t1) return -1 }
+  if (Math.abs(dz) < 1e-8) { if (oz < minz || oz > maxz) return -1 }
+  else { const inv = 1 / dz; let ta = (minz - oz) * inv; let tb = (maxz - oz) * inv; if (ta > tb) { const s = ta; ta = tb; tb = s } if (ta > t0) t0 = ta; if (tb < t1) t1 = tb; if (t0 > t1) return -1 }
+  return t0
+}
+
 interface FxItem {
   obj: THREE.Object3D
   mat: THREE.Material & { opacity: number; color: THREE.Color }
@@ -164,7 +182,7 @@ export class Combat {
   private matCache = new Map<number, THREE.MeshBasicMaterial>() // 色→共有マテリアル(生成は色ごと一度きり)
   private tmpDir = new THREE.Vector3()
   private tmpV = new THREE.Vector3()
-  private hitMeshes: THREE.Mesh[] = [] // ユニット交差判定用の使い回し配列
+  private tmpHit = new THREE.Vector3() // ユニットヒット点の使い回し
 
   /** 計測用(__tw.perf): アクティブ弾数 / プール退避数。プールが青天井に伸びていなければリーク無し */
   get boltCount() { return this.bolts.length }
@@ -238,18 +256,21 @@ export class Combat {
       const obs = this.ray.intersectObjects(this.world.obstacleMeshes, false) // 非再帰: obstacleMeshesは全て単純な箱/円柱プロキシ(軽い)
       const obsDist = obs.length ? obs[0].distance : Infinity
 
-      // 敵ユニットとの交差(配列は使い回し=毎フレームの確保を回避)
-      const meshes = this.hitMeshes
-      meshes.length = 0
+      // 敵ユニットとの交差: キャラ等はスキンドメッシュ(数十万tri)でmesh raycastが秒単位に激重
+      // (打ち合いで深刻な処理落ちの主因だった)。pos/radius/heightのAABB(カプセル相当)で解析判定する=
+      // 割り当て無し・桁違いに軽い。step区間で最も近いユニットを選ぶ。
+      let hitUnit: Unit | null = null
+      let unitDist = Infinity
       for (const u of this.world.units) {
-        if (u.alive && u.team !== b.opts.team && u !== b.opts.from) { for (const hm of u.hitMeshes) meshes.push(hm) }
+        if (!u.alive || u.team === b.opts.team || u === b.opts.from) continue
+        const up = u.group.position
+        const r = u.radius
+        const t = rayAabb(b.pos.x, b.pos.y, b.pos.z, dir.x, dir.y, dir.z, up.x - r, up.y, up.z - r, up.x + r, up.y + u.height, up.z + r, step)
+        if (t >= 0 && t < unitDist) { unitDist = t; hitUnit = u }
       }
-      const hits = this.ray.intersectObjects(meshes, false)
-      const unitDist = hits.length ? hits[0].distance : Infinity
 
-      if (unitDist < obsDist && unitDist <= step) {
-        const hitUnit = hits[0].object.userData.unit as Unit
-        const point = hits[0].point
+      if (hitUnit && unitDist < obsDist && unitDist <= step) {
+        const point = this.tmpHit.copy(dir).multiplyScalar(unitDist).add(b.pos)
         const dist = b.traveled + unitDist
         const dmg = b.opts.damage * (b.opts.falloff ? falloffMul(b.opts.falloff, dist) : 1)
         if (b.opts.explosive) {
