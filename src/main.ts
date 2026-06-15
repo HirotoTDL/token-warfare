@@ -1003,6 +1003,19 @@ function lobbyCleanup() {
   if (lobbyTransport && lobbyTransport.state !== 'open') lobbyTransport.close()
   lobbyTransport = null
 }
+/** 接続エラーを原因別の日本語メッセージに(peerjsの error.type / timeout を見分ける) */
+function lobbyErrMsg(e: any, joining: boolean): string {
+  const type = e && (e.type || e.message)
+  if (type === 'timeout') return joining
+    ? '接続がタイムアウトしました。合言葉と回線を確認して、もう一度お試しください。'
+    : '部屋の作成がタイムアウトしました。回線を確認して、もう一度お試しください。'
+  if (type === 'peer-unavailable') return 'その合言葉の部屋が見つかりません。ホストが待機中か、合言葉が正しいか確認してください。'
+  if (type === 'network' || type === 'server-error' || type === 'socket-error' || type === 'socket-closed')
+    return 'シグナリングサーバに接続できません。回線を確認して、もう一度お試しください。'
+  if (type === 'browser-incompatible') return 'このブラウザはWebRTC P2Pに対応していません。'
+  return joining ? '接続に失敗しました(合言葉/回線を確認)。戻ってやり直してください。'
+                 : '部屋の作成に失敗しました(回線/ブローカー)。戻ってやり直してください。'
+}
 /** 接続確立 → キャラ選択へ。出撃時に ready{char,map} を交換し、双方揃ったらオンライン対戦を開始する。 */
 function onNetConnected(transport: NetTransport, role: NetRole) {
   pendingNet = { transport, role }
@@ -1032,6 +1045,17 @@ function onNetConnected(transport: NetTransport, role: NetRole) {
     transport.send('event', { type: 'ready', char: selectedChar.key, map: pendingMap })
     tryStart()
   }
+  // ロビー中(キャラ選択〜出撃前)に相手が切断したら、無限待ちにせずロビーへ戻して通知する。
+  // 対戦開始後は BattleView 側が onStateChange を上書きして自前で終了処理する(役割交代)。
+  transport.onStateChange((s) => {
+    if ((s === 'closed' || s === 'failed') && !started) {
+      pendingNet = null
+      pendingNetSortie = null
+      lobbyTransport = null
+      showScreen('lobby')
+      lobbyShowStatus('相手との接続が切れました。もう一度ホスト/参加からやり直してください。')
+    }
+  })
   lobbyShowStatus('P2P接続が確立しました！コマンダーを選んで出撃。')
   setTimeout(() => showScreen('select'), 600)
 }
@@ -1050,7 +1074,7 @@ document.getElementById('lobby-host')!.addEventListener('click', () => {
     lobbyEl.codeBox.classList.remove('hidden')
     lobbyEl.code.textContent = code
     lobbyEl.msg.textContent = '合言葉を相手に伝えて待機中…'
-  }).catch(() => { lobbyEl.msg.textContent = '部屋の作成に失敗(回線/ブローカー)。戻ってやり直してください。' })
+  }).catch((e) => { lobbyEl.msg.textContent = lobbyErrMsg(e, false) })
   transport.onStateChange((s) => { if (s === 'open') onNetConnected(transport, 'host') })
 })
 document.getElementById('lobby-join')!.addEventListener('click', () => {
@@ -1061,7 +1085,7 @@ document.getElementById('lobby-join')!.addEventListener('click', () => {
   const { transport, connected } = WebRtcTransport.join(code)
   lobbyTransport = transport
   connected.then(() => onNetConnected(transport, 'client'))
-    .catch(() => { lobbyEl.msg.textContent = '接続に失敗(合言葉/回線を確認)。戻ってやり直してください。' })
+    .catch((e) => { lobbyEl.msg.textContent = lobbyErrMsg(e, true) })
 })
 document.getElementById('lobby-copy')!.addEventListener('click', () => {
   const code = lobbyEl.code.textContent ?? ''
@@ -1466,6 +1490,16 @@ window.addEventListener('resize', () => {
     r.ok = r.predictionTight
     host.dispose(); client.dispose()
     return r
+  },
+  // 接続タイムアウト検証(手動プローブ): 無効な部屋コードへ短いタイムアウトで参加し、無限スピナーにならず
+  // 必ず reject する(timeout か peer-unavailable)ことを確認。実PeerJSブローカーへ繋ぐためネットワーク必須=okスイート外。
+  netTimeoutProbe(timeoutMs = 2500) {
+    const t0 = performance.now()
+    const { connected } = WebRtcTransport.join('tw-nonexistent-room-zzz', timeoutMs)
+    return connected.then(
+      () => ({ rejected: false, note: '予期せず接続成功(無効コードのはず)' }),
+      (e: any) => ({ rejected: true, reason: (e && (e.type || e.message)) || 'unknown', ms: Math.round(performance.now() - t0) }),
+    )
   },
 }
 
