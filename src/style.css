@@ -433,3 +433,43 @@ body {
   .hud-bc { bottom: 120px; width: 420px; }
   .hud-br { bottom: 330px; }
 }
+
+/* ===== オンライン対戦ロビー ===== */
+.beta-tag {
+  font-size: 12px; letter-spacing: 0.15em; vertical-align: middle;
+  background: linear-gradient(135deg, var(--mint), var(--lav)); color: #fff;
+  border-radius: 10px; padding: 2px 8px; margin-left: 6px;
+}
+.lobby-wrap {
+  display: flex; flex-direction: column; align-items: center; gap: 22px;
+  min-height: 220px; justify-content: center;
+}
+.lobby-choice { display: flex; flex-direction: column; align-items: center; gap: 20px; }
+.lobby-join { display: flex; gap: 10px; align-items: center; }
+#lobby-code-input {
+  font: inherit; color: #fff; font-size: 17px; letter-spacing: 0.05em;
+  background: rgba(20, 26, 48, 0.85); border: 1px solid rgba(255, 255, 255, 0.4);
+  border-radius: 18px; padding: 12px 20px; width: 320px; text-align: center;
+}
+#lobby-code-input::placeholder { color: rgba(220, 225, 255, 0.55); }
+.lobby-status { display: flex; flex-direction: column; align-items: center; gap: 18px; text-align: center; }
+#lobby-msg { font-size: 18px; color: #fff; max-width: 560px; line-height: 1.6; text-shadow: 0 1px 4px rgba(60, 40, 90, 0.6); }
+.lobby-code-box {
+  display: flex; align-items: center; gap: 12px; flex-wrap: wrap; justify-content: center;
+  background: rgba(20, 26, 48, 0.8); border: 1px solid rgba(255, 255, 255, 0.3);
+  border-radius: 16px; padding: 14px 20px;
+}
+.lobby-code-label { font-size: 13px; color: rgba(220, 225, 255, 0.8); letter-spacing: 0.1em; }
+#lobby-code { font-size: 16px; color: #ffe9a0; word-break: break-all; font-family: monospace; max-width: 360px; }
+.btn-copy {
+  font: inherit; cursor: pointer; font-size: 13px; color: #fff; letter-spacing: 0.1em;
+  border: 1px solid rgba(255, 255, 255, 0.4); background: rgba(45, 55, 95, 0.9);
+  border-radius: 14px; padding: 7px 16px;
+}
+.btn-copy:hover { background: rgba(70, 85, 140, 0.95); }
+.lobby-spinner {
+  width: 34px; height: 34px; border-radius: 50%;
+  border: 3px solid rgba(255, 255, 255, 0.25); border-top-color: var(--pink);
+  animation: lobby-spin 0.9s linear infinite;
+}
+@keyframes lobby-spin { to { transform: rotate(360deg); } }

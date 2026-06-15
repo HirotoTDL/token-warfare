@@ -46,7 +46,34 @@
         <p>レベルを選んで腕試し(Lv1=入門 〜 Lv10=鬼)</p>
         <div class="level-grid" id="level-grid"></div>
       </div>
+      <div class="mode-card" id="btn-online">
+        <h3>オンライン対戦 <span class="beta-tag">BETA</span></h3>
+        <p>部屋を作るか合言葉で参加して1on1(WebRTC P2P)</p>
+      </div>
     </div>
+  </div>
+
+  <div id="screen-lobby" class="screen hidden">
+    <h2 class="select-heading">オンライン対戦</h2>
+    <div class="lobby-wrap">
+      <div class="lobby-choice" id="lobby-choice">
+        <button class="btn-main" id="lobby-host">部屋を作る</button>
+        <div class="lobby-join">
+          <input id="lobby-code-input" maxlength="40" placeholder="合言葉を入力して参加" autocomplete="off" />
+          <button class="btn-main" id="lobby-join">参加</button>
+        </div>
+      </div>
+      <div class="lobby-status hidden" id="lobby-status">
+        <p id="lobby-msg">接続中…</p>
+        <div class="lobby-code-box hidden" id="lobby-code-box">
+          <span class="lobby-code-label">合言葉(相手に共有):</span>
+          <code id="lobby-code"></code>
+          <button class="btn-copy" id="lobby-copy">コピー</button>
+        </div>
+        <div class="lobby-spinner"></div>
+      </div>
+    </div>
+    <button id="btn-lobby-back" class="btn-sub">戻る</button>
   </div>
 
   <div id="screen-select" class="screen hidden">

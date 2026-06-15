@@ -23,9 +23,10 @@ import { simulateMatch, simulateMatrix, summarize } from './sim'
 import { Objectives, CAPTURE_TO_WIN } from './objectives'
 import { DamagePopups } from './dmgpop'
 import { PostFX } from './postfx'
-import { LoopbackTransport } from './net/transport'
+import { LoopbackTransport, type NetTransport, type NetRole } from './net/transport'
 import { RemoteCommander } from './net/remoteCommander'
 import type { NetInput } from './net/netInput'
+import { WebRtcTransport } from './net/webrtcTransport'
 import { RoomEnvironment } from 'three/examples/jsm/environments/RoomEnvironment.js'
 
 // --- 基盤 ---
@@ -78,6 +79,7 @@ const hudRoot = document.getElementById('hud')!
 const screens = {
   title: document.getElementById('screen-title')!,
   mode: document.getElementById('screen-mode')!,
+  lobby: document.getElementById('screen-lobby')!,
   select: document.getElementById('screen-select')!,
   result: document.getElementById('screen-result')!,
 }
@@ -823,6 +825,89 @@ for (let lv = 1; lv <= 10; lv++) {
   levelGrid.appendChild(b)
 }
 
+// --- オンライン対戦ロビー(WebRTC P2P) ---
+// 部屋を作る=ホスト(権威)/合言葉で参加=クライアント。接続が確立したら pendingNet を立て、
+// キャラ選択→出撃でオンライン対戦を開始する(対戦本体の同期は PvP Phase2)。
+let pendingNet: { transport: NetTransport; role: NetRole } | null = null
+const lobbyEl = {
+  choice: document.getElementById('lobby-choice')!,
+  status: document.getElementById('lobby-status')!,
+  msg: document.getElementById('lobby-msg')!,
+  codeBox: document.getElementById('lobby-code-box')!,
+  code: document.getElementById('lobby-code')!,
+  codeInput: document.getElementById('lobby-code-input') as HTMLInputElement,
+}
+let lobbyTransport: WebRtcTransport | null = null
+
+function lobbyReset() {
+  lobbyEl.choice.classList.remove('hidden')
+  lobbyEl.status.classList.add('hidden')
+  lobbyEl.codeBox.classList.add('hidden')
+  lobbyEl.msg.textContent = '接続中…'
+}
+function lobbyShowStatus(msg: string) {
+  lobbyEl.choice.classList.add('hidden')
+  lobbyEl.status.classList.remove('hidden')
+  lobbyEl.msg.textContent = msg
+}
+function lobbyCleanup() {
+  if (lobbyTransport && lobbyTransport.state !== 'open') lobbyTransport.close()
+  lobbyTransport = null
+}
+/** 接続確立。pendingNetを保持。対戦本体(スナップショット同期)は PvP Phase2 で startOnlineBattle が担う。
+ *  Phase1ではP2P接続の成立までを確認する(双方が hello を交換して疎通確認)。 */
+function onNetConnected(transport: NetTransport, role: NetRole) {
+  pendingNet = { transport, role }
+  // 疎通確認: 双方が hello を送り合い、受信できたら接続を確証する
+  let peerHello = false
+  transport.onMessage((ch, data) => {
+    if (ch === 'event' && data && (data as any).hello) {
+      peerHello = true
+      lobbyShowStatus('P2P接続が確立しました！(' + (role === 'host' ? 'ホスト' : 'ゲスト') + ') 対戦の同期は次アップデート(Phase2)で実装します。')
+    }
+  })
+  transport.send('event', { hello: role })
+  setTimeout(() => { if (!peerHello) lobbyShowStatus('接続は開きましたが疎通確認待ちです(' + role + ')。') }, 1500)
+}
+
+document.getElementById('btn-online')!.addEventListener('click', () => {
+  sfx.unlock()
+  lobbyReset()
+  showScreen('lobby')
+})
+document.getElementById('lobby-host')!.addEventListener('click', () => {
+  sfx.unlock()
+  lobbyShowStatus('部屋を準備中…')
+  const { transport, ready } = WebRtcTransport.host()
+  lobbyTransport = transport
+  ready.then((code) => {
+    lobbyEl.codeBox.classList.remove('hidden')
+    lobbyEl.code.textContent = code
+    lobbyEl.msg.textContent = '合言葉を相手に伝えて待機中…'
+  }).catch(() => { lobbyEl.msg.textContent = '部屋の作成に失敗(回線/ブローカー)。戻ってやり直してください。' })
+  transport.onStateChange((s) => { if (s === 'open') onNetConnected(transport, 'host') })
+})
+document.getElementById('lobby-join')!.addEventListener('click', () => {
+  sfx.unlock()
+  const code = lobbyEl.codeInput.value.trim()
+  if (!code) { lobbyEl.codeInput.focus(); return }
+  lobbyShowStatus('ホストに接続中…')
+  const { transport, connected } = WebRtcTransport.join(code)
+  lobbyTransport = transport
+  connected.then(() => onNetConnected(transport, 'client'))
+    .catch(() => { lobbyEl.msg.textContent = '接続に失敗(合言葉/回線を確認)。戻ってやり直してください。' })
+})
+document.getElementById('lobby-copy')!.addEventListener('click', () => {
+  const code = lobbyEl.code.textContent ?? ''
+  if (code) navigator.clipboard?.writeText(code).then(() => { lobbyEl.msg.textContent = 'コピーしました！相手に伝えてください。' }).catch(() => {})
+})
+document.getElementById('btn-lobby-back')!.addEventListener('click', () => {
+  sfx.unlock()
+  lobbyCleanup()
+  pendingNet = null
+  showScreen('mode')
+})
+
 // キャラ選択(ロスター＋大プレビュー＋詳細パネル＋出撃)
 const rosterRoot = document.getElementById('char-roster')!
 const previewWrap = document.getElementById('char-preview')!
@@ -977,6 +1062,35 @@ window.addEventListener('resize', () => {
       idle_drift_m: +idleDrift.toFixed(2), // 入力停止で慣性減衰し停止したか(小さい値期待)
       ok: movedDist > 1 && maxBolts > 0,
     }
+  },
+  // PvP Phase1検証: 同一ページでWebRTC host+joinをブローカー経由で接続し、hello交換を確認。
+  // 結果は window.__netTestResult に格納(非同期のためポーリングで読む)。
+  netConnectTest() {
+    ;(window as any).__netTestResult = { status: 'running' }
+    const fin = (r: any) => { (window as any).__netTestResult = r }
+    const { transport: h, ready } = WebRtcTransport.host()
+    let hostGotHello = false
+    let clientGotHello = false
+    h.onMessage((ch, d: any) => { if (ch === 'event' && d && d.hello) hostGotHello = true })
+    const killer = setTimeout(() => { try { h.close() } catch {} fin({ status: 'timeout' }) }, 15000)
+    ready.then((code: string) => {
+      const { transport: c, connected } = WebRtcTransport.join(code)
+      c.onMessage((ch, d: any) => { if (ch === 'event' && d && d.hello) clientGotHello = true })
+      connected.then(() => {
+        // 双方のチャネルが open になってから送る(実ロビーは各自のopenで送るのと同条件)
+        setTimeout(() => {
+          c.send('event', { hello: 'client' })
+          h.send('event', { hello: 'host' })
+        }, 400)
+        setTimeout(() => {
+          clearTimeout(killer)
+          const r = { status: 'done', code, hostState: h.state, clientState: c.state, hostGotHello, clientGotHello, ok: h.state === 'open' && c.state === 'open' && hostGotHello && clientGotHello }
+          try { c.close() } catch {} try { h.close() } catch {}
+          fin(r)
+        }, 1400)
+      }).catch((e: any) => { clearTimeout(killer); fin({ status: 'join-failed', err: String(e) }) })
+    }).catch((e: any) => { clearTimeout(killer); fin({ status: 'host-failed', err: String(e) }) })
+    return 'started — poll window.__netTestResult'
   },
 }
 
