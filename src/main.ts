@@ -357,6 +357,8 @@ class BattleView implements View {
   private inSeq = 0 // client: 入力連番
   private lastSnap: Snapshot | null = null // client: 直近受信スナップ(未適用)
   private lastOppHp = 99999 // client: 相手将の前回HP(被弾→ヒットマーカー判定用)
+  private clientSphereOwner: Record<string, Team | null> = {} // client: 各スフィアの前回所有者(確保/被奪取の遷移検出用)
+  private clientSpheresSeen = false // client: スフィア所有者を1度記録したか(初回はバナーを鳴らさない)
   over = false
   everLocked = false
   timer = MATCH_TIME
@@ -671,6 +673,21 @@ class BattleView implements View {
     const o = this.objectives
     o.center.charge = snap.spheres[0]; o.base.blue.charge = snap.spheres[1]; o.base.red.charge = snap.spheres[2]
     for (const s of o.spheres) s.update(_dt)
+    // スフィア確保/被奪取のフィードバックもホストの!isClientブロック限定だった。chargeから所有権遷移を自前検出し、
+    // 赤(自分)視点でバナー/SEを鳴らす(redBase=自陣, blueBase=敵陣 と反転。host視点の流用は禁物)。
+    for (const s of o.spheres) {
+      const own = s.owner()
+      if (this.clientSpheresSeen && own !== this.clientSphereOwner[s.id] && own !== null) {
+        const name = s.id === 'center' ? '中央' : s.id === 'redBase' ? '自陣' : '敵陣'
+        if (own === 'red') { // 自分(赤)が確保
+          this.hud.killBanner(`${name}スフィア 確保!`, true); this.hud.feed(`${name}スフィアを確保した`); sfx.core(); this.hitstopT = Math.max(this.hitstopT, 0.18)
+        } else { // 相手(青)が確保=自分が奪われた
+          this.hud.warn(`⚠ ${name}スフィアを奪われた!`, 2); sfx.damaged(); this.hud.damage()
+        }
+      }
+      this.clientSphereOwner[s.id] = own
+    }
+    this.clientSpheresSeen = true
     // 自機(赤将)の権威状態を反映(HP/生存)＋大きくドリフトしたら位置を引き戻す
     // 相手将(青)のHPが下がった=自分が当てた → ヒットマーカー(1v1なのでほぼ自分の戦果。dmgDealt集計も)
     const opp = snap.units.find((u) => u.kind === 'commander' && u.team === 'blue')
@@ -1375,6 +1392,14 @@ window.addEventListener('resize', () => {
     c.send('event', { type: 'skill' })
     for (let f = 0; f < 4; f++) { host.update(1 / 60); client.update(1 / 60) }
     const skillActivated = (host.bot as any).skillCd > 0
+    // スフィア確保フィードバック(client側): ホストで中央を赤(=client自分)が確保→clientが「確保!」バナーを鳴らす
+    let clientSphereBanner: any = null
+    const origKB = (client as any).hud.killBanner.bind((client as any).hud)
+    ;(client as any).hud.killBanner = (msg: string, good: boolean) => { clientSphereBanner = { msg, good }; return origKB(msg, good) }
+    ;(host as any).objectives.center.charge = -0.9 // 中央を赤(client)が確保した状態に
+    for (let f = 0; f < 8; f++) { host.update(1 / 60); client.update(1 / 60) }
+    ;(client as any).hud.killBanner = origKB
+    const clientSphereCaptureFeedback = !!clientSphereBanner && /確保/.test(clientSphereBanner.msg) && clientSphereBanner.good === true
     // サドンデス同期: ホストがサドンデス突入→snapshot.sd→クライアントもsuddenDeath化(HUDのSD表示・告知)
     ;(host as any).suddenDeath = true
     for (let f = 0; f < 8; f++) { host.update(1 / 60); client.update(1 / 60) }
@@ -1412,11 +1437,12 @@ window.addEventListener('resize', () => {
       redTokenBoltRelayed, // 自軍(赤)トークンの弾も相手画面に中継される(true期待)
       ownCommanderBoltNotRelayed, // 自機将の弾は中継しない=二重描画回避(true期待)
       skillActivated, // クライアントのスキル発動→ホストが権威適用(true期待)
+      clientSphereCaptureFeedback, // クライアントがスフィア確保時にバナー/SEを鳴らす(true期待)
       suddenDeathSynced, // ホストのサドンデス→snapshot.sd→クライアントも同期(true期待)
       matchEndSynced, // ホストの終了通知→クライアントも終了(true期待)
       clientLossPerspective, // 自陣(赤)視点で敗北ジングルが鳴る=勝敗の音が逆転しない(true期待)
       clientCombatFeedback: { dealt: Math.round(client.stats.dmgDealt), taken: Math.round(client.stats.dmgTaken) }, // 相手被弾→dealt, 自機被弾→taken(両>0期待)
-      ok: snapsSeen > 0 && puppetCount > 0 && clientVisualBolts > 0 && deploySpawnedToken && redTokenBoltRelayed && ownCommanderBoltNotRelayed && skillActivated && suddenDeathSynced && matchEndSynced && clientLossPerspective && client.stats.dmgDealt > 0 && client.stats.dmgTaken > 0,
+      ok: snapsSeen > 0 && puppetCount > 0 && clientVisualBolts > 0 && deploySpawnedToken && redTokenBoltRelayed && ownCommanderBoltNotRelayed && skillActivated && clientSphereCaptureFeedback && suddenDeathSynced && matchEndSynced && clientLossPerspective && client.stats.dmgDealt > 0 && client.stats.dmgTaken > 0,
     } as any
     // 切断ハンドリング検証: クライアント切断→両者のマッチがover(フリーズしない)
     c.close()
