@@ -102,11 +102,11 @@ export interface CharacterDef {
 export const CHARACTERS: CharacterDef[] = [
   {
     key: 'renji', name: 'レンジ', gender: 'm', title: 'ビートを刻む先鋒', role: 'バランス/突撃',
-    desc: '迷ったらコイツ。中距離の差し合いとストライカーの波状攻撃で前線を押し上げる。',
+    desc: '迷ったらコイツ。中距離の差し合いとストライカーの波状攻撃で前線を押し上げる。〈射程:中／連射:高／確定5発・KT約0.50s〉',
     hp: 115, color: 0xff7a2f, subColor: 0xffd23e, variant: 0,
     weapon: {
       name: 'ビートショット', desc: '中距離ピークの王道ブラスター',
-      damage: 11, pellets: 1, rate: 8, energyCost: 3.2, boltSpeed: 130,
+      damage: 23, pellets: 1, rate: 8, energyCost: 3.2, boltSpeed: 130,
       falloff: [{ d: 0, mul: 0.85 }, { d: 10, mul: 1 }, { d: 24, mul: 1 }, { d: 55, mul: 0.6 }],
       spread: 0.02, zoomFov: 48, recoil: 0.01, auto: true, boltColor: 0xffb347,
     },
@@ -115,11 +115,11 @@ export const CHARACTERS: CharacterDef[] = [
   },
   {
     key: 'garo', name: 'ガロ', gender: 'm', title: '鉄板焼きの壁男', role: 'タンク/制圧',
-    desc: '近距離の鬼。ウォールポッドで地形ごと盤面を書き換える、歩く工事現場。',
+    desc: '近距離の鬼。ウォールポッドで地形ごと盤面を書き換える、歩く工事現場。〈射程:近／連射:低／確定2発・KT約0.63s／近接は高威力〉',
     hp: 140, color: 0x49c46a, subColor: 0xb6ff5c, variant: 1,
     weapon: {
       name: 'ドラムバースト', desc: '6粒拡散の近距離キャノン',
-      damage: 7, pellets: 6, rate: 1.6, energyCost: 12, boltSpeed: 100,
+      damage: 13, pellets: 6, rate: 1.6, energyCost: 12, boltSpeed: 100,
       falloff: [{ d: 0, mul: 1.3 }, { d: 8, mul: 1 }, { d: 18, mul: 0.58 }, { d: 30, mul: 0.25 }],
       spread: 0.07, zoomFov: 55, recoil: 0.035, auto: true, boltColor: 0x8aff7a,
     },
@@ -128,11 +128,11 @@ export const CHARACTERS: CharacterDef[] = [
   },
   {
     key: 'jin', name: 'ジン', gender: 'm', title: '蜃気楼のスナイパー', role: '狙撃/隠密',
-    desc: '長い射線を一人で支配する。マインと迷彩で「いない場所」から削る。',
+    desc: '長い射線を一人で支配する。マインと迷彩で「いない場所」から削る。〈射程:遠／連射:最低／確定1〜2発・KT0〜1.2s／遠距離は急所即死級〉',
     hp: 95, color: 0x35c8d8, subColor: 0xc8f4ff, variant: 2,
     weapon: {
       name: 'ロングレイル', desc: '遠距離特化の貫通レール',
-      damage: 50, pellets: 1, rate: 0.82, energyCost: 17, boltSpeed: 260,
+      damage: 90, pellets: 1, rate: 0.82, energyCost: 17, boltSpeed: 260,
       falloff: [{ d: 0, mul: 0.45 }, { d: 18, mul: 0.75 }, { d: 40, mul: 1.2 }, { d: 90, mul: 1.2 }],
       spread: 0.002, zoomFov: 20, recoil: 0.035, auto: false, boltColor: 0x7af0ff,
     },
@@ -141,11 +141,11 @@ export const CHARACTERS: CharacterDef[] = [
   },
   {
     key: 'doku', name: 'ドク', gender: 'm', title: 'ガレージの整備班長', role: 'サポート/工兵',
-    desc: '盤面の維持力No.1。パイロンで分裂体を強化し、長期戦に持ち込めば負けない。',
+    desc: '盤面の維持力No.1。パイロンで分裂体を強化し、長期戦に持ち込めば負けない。〈射程:中／連射:最高／確定9発・KT約0.73s〉',
     hp: 110, color: 0xf2c531, subColor: 0x7adfff, variant: 3,
     weapon: {
       name: 'パルスキャリバー', desc: '低燃費の近中距離SMG',
-      damage: 6.5, pellets: 1, rate: 11, energyCost: 2.4, boltSpeed: 110,
+      damage: 13, pellets: 1, rate: 11, energyCost: 2.4, boltSpeed: 110,
       falloff: [{ d: 0, mul: 1.1 }, { d: 8, mul: 1 }, { d: 20, mul: 0.8 }, { d: 45, mul: 0.5 }],
       spread: 0.03, zoomFov: 50, recoil: 0.007, auto: true, boltColor: 0xffe96b,
     },
@@ -154,11 +154,11 @@ export const CHARACTERS: CharacterDef[] = [
   },
   {
     key: 'mimi', name: 'ミミ', gender: 'f', title: 'ハイテンション・ラッシャー', role: 'スピード/ラッシュ',
-    desc: '最速で踏み込み最速で逃げる。チェイサーで敵将の居場所を暴くお祭り娘。',
+    desc: '最速で踏み込み最速で逃げる。チェイサーで敵将の居場所を暴くお祭り娘。〈射程:近中／連射:高／確定6発・KT約0.56s〉',
     hp: 108, color: 0xff4fa3, subColor: 0xffe2f1, variant: 4,
     weapon: {
       name: 'ツインポッパー', desc: '2丁同時発射の近距離ポッパー',
-      damage: 4.4, pellets: 2, rate: 9, energyCost: 2.5, boltSpeed: 110,
+      damage: 10, pellets: 2, rate: 9, energyCost: 2.5, boltSpeed: 110,
       // バランス調整: 突出していた近距離ピークを抑制(密着でも最大火力だったのを是正)
       falloff: [{ d: 0, mul: 1.1 }, { d: 6, mul: 1.1 }, { d: 16, mul: 0.78 }, { d: 35, mul: 0.48 }],
       spread: 0.045, zoomFov: 55, recoil: 0.008, auto: true, boltColor: 0xff8fd0,
@@ -168,12 +168,12 @@ export const CHARACTERS: CharacterDef[] = [
   },
   {
     key: 'nanase', name: 'ナナセ', gender: 'f', title: '重低音の砲撃手', role: '爆発/砲撃',
-    desc: '山なりの爆発弾で遮蔽ごと盤面を耕す。近づかれてもビートドロップで吹き飛ばす。',
+    desc: '山なりの爆発弾で遮蔽ごと盤面を耕す。近づかれてもビートドロップで吹き飛ばす。〈射程:遠(曲射)／連射:低／確定2発・KT約0.9s＋範囲〉',
     hp: 120, color: 0x9b5cff, subColor: 0xffd23e, variant: 5,
     weapon: {
       name: 'ポンプランチャー', desc: '山なり弾道の爆発ランチャー',
-      // バランス調整: 対単体の直撃火力と着弾速度を底上げ(最弱だった砲撃を実用域へ)
-      damage: 30, pellets: 1, rate: 1.1, energyCost: 15, boltSpeed: 80,
+      // 火力強化(2026-06-15): 直撃2発確定。低連射ゆえ単体TTKは長め(0.9s)だが範囲制圧が本領
+      damage: 60, pellets: 1, rate: 1.1, energyCost: 15, boltSpeed: 80,
       falloff: [{ d: 0, mul: 0.8 }, { d: 10, mul: 1 }, { d: 30, mul: 1 }, { d: 60, mul: 0.7 }],
       spread: 0.012, zoomFov: 50, recoil: 0.03, auto: false,
       explosive: { radius: 2.6 }, gravity: 9, boltColor: 0xc89bff,
@@ -183,11 +183,11 @@ export const CHARACTERS: CharacterDef[] = [
   },
   {
     key: 'riko', name: 'リコ', gender: 'f', title: '路地裏のトリックスター', role: 'トリック/攪乱',
-    desc: 'デコイとジャマーで敵のAIと人間、両方を騙す。読み合いを制する玄人向け。',
+    desc: 'デコイとジャマーで敵のAIと人間、両方を騙す。読み合いを制する玄人向け。〈射程:中遠／3点バースト／確定6発(2バースト)・KT約0.50s〉',
     hp: 105, color: 0xff4040, subColor: 0x2e2e3e, variant: 6,
     weapon: {
       name: 'スピットファイア', desc: '3点バーストの精密ブラスター',
-      damage: 9, pellets: 1, rate: 2.8, energyCost: 7.5, boltSpeed: 120,
+      damage: 19, pellets: 1, rate: 2.8, energyCost: 7.5, boltSpeed: 120,
       falloff: [{ d: 0, mul: 0.9 }, { d: 12, mul: 1 }, { d: 28, mul: 0.9 }, { d: 60, mul: 0.55 }],
       spread: 0.012, zoomFov: 45, recoil: 0.012, auto: true,
       burst: 3, burstInterval: 0.07, boltColor: 0xff6a5a,
@@ -197,12 +197,12 @@ export const CHARACTERS: CharacterDef[] = [
   },
   {
     key: 'yume', name: 'ユメ', gender: 'f', title: '星を読むハンター', role: 'ハンター/情報',
-    desc: 'ソナーで敵将を暴き、スナイパードローンと挟む。情報こそ最強の弾丸。',
+    desc: 'ソナーで敵将を暴き、スナイパードローンと挟む。情報こそ最強の弾丸。〈射程:遠／連射:中高／確定5発・KT約0.67s〉',
     hp: 100, color: 0x5c7cff, subColor: 0xd8c8ff, variant: 7,
     weapon: {
       name: 'シーカーカービン', desc: '中遠距離で減衰しないカービン',
-      // バランス調整: 火力不足だったため小幅上方修正
-      damage: 10.5, pellets: 1, rate: 6, energyCost: 3.1, boltSpeed: 140,
+      // 火力強化(2026-06-15): 確定5発・KT0.67s。長射程ゆえ扱いやすい=やや長めのTTK
+      damage: 23, pellets: 1, rate: 6, energyCost: 3.1, boltSpeed: 140,
       falloff: [{ d: 0, mul: 0.7 }, { d: 15, mul: 1 }, { d: 45, mul: 1 }, { d: 80, mul: 0.7 }],
       spread: 0.014, zoomFov: 38, recoil: 0.012, auto: true, boltColor: 0x9bb4ff,
     },

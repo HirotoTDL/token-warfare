@@ -7,9 +7,12 @@ export type SphereId = 'center' | 'blueBase' | 'redBase'
 
 // リサーチ(ゾーン制圧FPS先行事例)に基づく値:
 export const CAP_THRESHOLD = 0.55 // |charge|がこれ以上で占領。±0.55未満は「無色=係争帯」を残す(Overwatch/Halo KOTH)
-// 与ダメ1あたりのcharge変化。将(50〜88DPS)で中央0→0.55を約2.6〜4.6秒射撃で確保=瞬間占領を防ぐバッファ。
-// (旧0.012は約0.9秒で瞬間占領になっていた=研究の禁止事項。0.0025へ是正。トークン供給はsupply()で直値charge/s)
-export const CAPTURE_PER_DAMAGE = 0.0025
+// 【2026-06-15 武器非依存化】占領は「スフィアを撃っている間の固定レート」で進む(旧=与ダメ比例だと武器火力差で
+// 制圧時間が2.6〜4.6秒とバラついた)。CAPTURE_RATE=0.18/s で 0→0.55(占領成立)が約3.0秒=全武器一律。
+// damage()は被弾マークのみ。実際の充填はupdate()で「直近CAPTURE_HIT_WINDOW秒に撃たれていれば固定レート加算」。
+// HIT_WINDOWは最も低連射な武器(ジン 0.82発/s=約1.22s間隔)でも継続射撃で途切れぬよう1.3sに設定し連射差を吸収。
+export const CAPTURE_RATE = 0.18 // 占領充填レート(charge/s)。0→0.55≈3.0s
+export const CAPTURE_HIT_WINDOW = 1.3 // この秒数内に撃たれていれば「占領中」=固定レート加算(武器連射差を吸収)
 export const CAPTURE_TO_WIN = 30 // 勝利カウント
 export const SPHERE_RADIUS = 1.6 // 当たり判定/見た目半径
 export const CONTEST_WINDOW = 0.5 // 直近この秒数に両軍から被弾していれば「係争中」
@@ -56,13 +59,9 @@ export class Sphere {
     return null
   }
 
-  /** team の攻撃で占領を進める(青=+/赤=−)。相殺は呼び出し側が同フレームで両軍分加算することで自然に起きる */
-  damage(team: Team, amount: number) {
-    // 逆転ペナルティ: 奪われた直後の側は、その球への供給が一時的に半減(即時取り返しを抑制)
-    let amt = amount
-    if (this.penaltyTeam === team && this.penaltyT > 0) amt *= 0.5
-    this.charge += (team === 'blue' ? 1 : -1) * amt * CAPTURE_PER_DAMAGE
-    this.charge = Math.max(-1, Math.min(1, this.charge))
+  /** team の攻撃が当たった事実を記録するのみ(占領充填はupdate()が固定レートで行う=武器火力非依存)。
+   *  _amount は呼び出し側互換のため受け取るが、占領速度には使わない(武器ごとの制圧時間差を解消)。 */
+  damage(team: Team, _amount: number) {
     if (team === 'blue') this.hitBlue = 0
     else this.hitRed = 0
   }
@@ -103,6 +102,24 @@ export class Sphere {
     this.hitBlue += dt
     this.hitRed += dt
     this.penaltyT = Math.max(0, this.penaltyT - dt)
+    // --- 占領充填(武器非依存・固定レート): 直近CAPTURE_HIT_WINDOW秒に撃たれているチームが CAPTURE_RATE/s で進める。
+    // 両軍同時=相殺(係争で停止)。逆転直後の取り返しは penalty で半減。これで制圧時間が全武器一律(約3秒)になる。
+    const blueCapturing = this.hitBlue < CAPTURE_HIT_WINDOW
+    const redCapturing = this.hitRed < CAPTURE_HIT_WINDOW
+    if (blueCapturing || redCapturing) {
+      let dc = 0
+      if (blueCapturing) {
+        let a = CAPTURE_RATE * dt
+        if (this.penaltyTeam === 'blue' && this.penaltyT > 0) a *= 0.5
+        dc += a
+      }
+      if (redCapturing) {
+        let a = CAPTURE_RATE * dt
+        if (this.penaltyTeam === 'red' && this.penaltyT > 0) a *= 0.5
+        dc -= a
+      }
+      this.charge = Math.max(-1, Math.min(1, this.charge + dc))
+    }
     this.justFlipped = null
     // 占有が反転したら「奪われた側」に再奪取ペナルティ(3秒・供給半減)+フリップ演出フラグ
     const own = this.owner()
