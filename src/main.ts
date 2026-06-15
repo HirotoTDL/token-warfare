@@ -1245,8 +1245,9 @@ window.addEventListener('resize', () => {
     const noop = () => {}
     const host = new BattleView({ charKey: 'renji', botLevel: 6, practice: false, mapKey: 'skyhaven' }, noop, { transport: h, role: 'host', oppCharKey: 'mimi' })
     const client = new BattleView({ charKey: 'mimi', botLevel: 6, practice: false, mapKey: 'skyhaven' }, noop, { transport: c, role: 'client', oppCharKey: 'renji' })
-    // ホスト青将を動かして、クライアント側puppetが追従するか見る
+    // ホスト青将を動かし(puppet追従)＋HPを削る(HPバー同期の確認)
     host.player.pos.set(5, 0, 10); host.player.group.position.copy(host.player.pos)
+    host.player.hp = 60
     let snapsSeen = 0
     const origIngest = (client as any).puppets.ingest.bind((client as any).puppets)
     ;(client as any).puppets.ingest = (s: any) => { snapsSeen++; origIngest(s) }
@@ -1268,12 +1269,14 @@ window.addEventListener('resize', () => {
     const puppetCount = (pm as any).puppets.size
     // ホスト青将に対応するpuppetの位置(クライアント視点で敵=青将)
     let bluePuppetPos: any = null
-    for (const [, p] of (pm as any).puppets) { bluePuppetPos = { x: +p.group.position.x.toFixed(1), z: +p.group.position.z.toFixed(1) }; break }
+    let bluePuppetHp: any = null
+    for (const [, p] of (pm as any).puppets) { bluePuppetPos = { x: +p.group.position.x.toFixed(1), z: +p.group.position.z.toFixed(1) }; bluePuppetHp = { hp: p.hp, mhp: p.mhp }; break }
     const r = {
       snapsReceived: snapsSeen,
       clientPuppetCount: puppetCount,
       hostBluePos: { x: 5, z: 10 },
       aBluePuppetPos: bluePuppetPos,
+      aBluePuppetHp: bluePuppetHp, // {hp:60, mhp:115}期待(ホストで削ったHPがpuppetに同期)
       clientScores: client.scores,
       hostScores: host.scores,
       clientPlayerTeam: client.player.team,

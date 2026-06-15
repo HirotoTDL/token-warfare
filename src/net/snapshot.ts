@@ -68,6 +68,10 @@ interface Puppet {
   tgtZ: number
   tgtYaw: number
   seen: number // 最終受信スナップのt(未受信=削除判定用)
+  hp: number
+  mhp: number
+  fill: THREE.Sprite // HPバーの残量(scale.xで増減・色で残量表現)
+  fillMat: THREE.SpriteMaterial
 }
 
 /**
@@ -102,8 +106,10 @@ export class PuppetManager {
       let p = this.puppets.get(u.id)
       if (!p) {
         const model = this.buildModel(u)
+        const bar = this.buildHpBar(u.kind)
+        model.add(bar.group)
         this.group.add(model)
-        p = { group: model, lastX: u.x, lastY: u.y, lastZ: u.z, lastYaw: u.yaw, tgtX: u.x, tgtY: u.y, tgtZ: u.z, tgtYaw: u.yaw, seen: snap.t }
+        p = { group: model, lastX: u.x, lastY: u.y, lastZ: u.z, lastYaw: u.yaw, tgtX: u.x, tgtY: u.y, tgtZ: u.z, tgtYaw: u.yaw, seen: snap.t, hp: u.hp, mhp: u.mhp, fill: bar.fill, fillMat: bar.fillMat }
         this.puppets.set(u.id, p)
         model.position.set(u.x, u.y, u.z)
         model.rotation.y = u.yaw
@@ -112,6 +118,7 @@ export class PuppetManager {
       p.lastX = p.group.position.x; p.lastY = p.group.position.y; p.lastZ = p.group.position.z; p.lastYaw = p.group.rotation.y
       p.tgtX = u.x; p.tgtY = u.y; p.tgtZ = u.z; p.tgtYaw = u.yaw
       p.seen = snap.t
+      p.hp = u.hp; p.mhp = u.mhp
       p.group.visible = u.alive
     }
     // スナップに居ないpuppet(撃破/退場)は削除
@@ -134,8 +141,30 @@ export class PuppetManager {
       if (d > Math.PI) d -= Math.PI * 2
       if (d < -Math.PI) d += Math.PI * 2
       p.group.rotation.y += d * k
+      // HPバー: 残量で幅(中央アンカー)と色(緑→黄→赤)を更新(Spriteは常にカメラを向く。頭上x=z=0なので回転に強い)
+      const ratio = Math.max(0, Math.min(1, p.mhp > 0 ? p.hp / p.mhp : 0))
+      p.fill.scale.x = Math.max(0.001, 1.0 * ratio)
+      p.fillMat.color.setRGB(ratio < 0.5 ? 1 : 2 * (1 - ratio), ratio > 0.5 ? 1 : 2 * ratio, 0.15)
       p.group.updateMatrixWorld()
     }
+  }
+
+  /** 頭上のHPバー(背景＋残量の2スプライト。Spriteは常時カメラを向く) */
+  private buildHpBar(kind: string): { group: THREE.Group; fill: THREE.Sprite; fillMat: THREE.SpriteMaterial } {
+    const g = new THREE.Group()
+    g.position.y = kind === 'commander' || kind === 'decoy' ? 2.2 : 1.1
+    const bgMat = new THREE.SpriteMaterial({ color: 0x101018, transparent: true, opacity: 0.7, depthTest: false })
+    const bg = new THREE.Sprite(bgMat)
+    bg.scale.set(1.06, 0.18, 1)
+    bg.renderOrder = 998
+    g.add(bg)
+    const fillMat = new THREE.SpriteMaterial({ color: 0x49ff6a, transparent: true, depthTest: false })
+    const fill = new THREE.Sprite(fillMat)
+    fill.scale.set(1.0, 0.12, 1)
+    fill.position.z = 0.01
+    fill.renderOrder = 999
+    g.add(fill)
+    return { group: g, fill, fillMat }
   }
 
   /** id→puppetの現在HP等(HUD/ヘルスバー用に必要なら拡張)。今は本体位置のみ。 */
