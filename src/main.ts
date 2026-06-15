@@ -460,6 +460,17 @@ class BattleView implements View {
     this.player.onDamaged = () => this.hud.damage()
     this.player.onMessage = (m) => this.hud.message(m)
 
+    // オンライン: 相手の切断/接続喪失でマッチがフリーズしないよう、検知して終了する(商業品質のロバスト性)
+    if (this.net) {
+      this.net.transport.onStateChange((s) => {
+        if ((s === 'closed' || s === 'failed') && !this.over) {
+          this.hud.killBanner('相手が切断しました', true)
+          this.hud.warn('⚠ 通信が切断されました — マッチ終了', 5)
+          this.finish()
+        }
+      })
+    }
+
     this.world.onDamage = (victim, attacker, amount) => {
       if (attacker === this.player) {
         this.stats.dmgDealt += amount
@@ -1283,7 +1294,12 @@ window.addEventListener('resize', () => {
       clientVisualBolts, // ホスト発射が視覚弾としてクライアントに再生された数(>0期待)
       peakClientBolts, // 同時に飛んでいたクライアント視覚弾のピーク
       ok: snapsSeen > 0 && puppetCount > 0 && clientVisualBolts > 0,
-    }
+    } as any
+    // 切断ハンドリング検証: クライアント切断→両者のマッチがover(フリーズしない)
+    c.close()
+    for (let f = 0; f < 5; f++) { host.update(1 / 60); client.update(1 / 60) }
+    r.disconnectEndsMatch = host.over && client.over
+    r.ok = r.ok && r.disconnectEndsMatch
     host.dispose(); client.dispose()
     return r
   },
