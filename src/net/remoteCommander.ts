@@ -4,11 +4,11 @@ import { Combat } from '../combat'
 import { Sfx } from '../sfx'
 import {
   ENERGY_MAX, ENERGY_CHARGE_RATE, ENERGY_PASSIVE_RATE, ENERGY_PASSIVE_DELAY, CHARGE_SPEED_MUL,
-  TP_REGEN_BASE, TEAM_COLOR,
+  TP_REGEN_BASE, TEAM_COLOR, enemyOf,
   type CharacterDef, type Team, type Unit,
 } from '../types'
 import { buildMonsterCommander } from '../models'
-import { TOKENS, loadoutFor } from '../tokens'
+import { TOKENS, loadoutFor, DecoyUnit } from '../tokens'
 import { getModel, animateSkeleton, animateGlbBody } from '../modelLoader'
 import type { NetTransport } from './transport'
 import type { NetInput } from './netInput'
@@ -55,6 +55,10 @@ export class RemoteCommander implements Unit {
   tp = 50
   tpRegenMul = 1
   invulnT = 0
+  skillCd = 0
+  private skillActiveT = 0
+  private skillKey = ''
+  private armorT = 0
 
   private world: World
   private combat: Combat
@@ -104,7 +108,49 @@ export class RemoteCommander implements Unit {
     transport.onMessage((ch, data: any) => {
       if (ch === 'input') this.setInput(data as NetInput)
       else if (ch === 'event' && data && data.type === 'deploy') this.deploy(data.key, data.x, data.z)
+      else if (ch === 'event' && data && data.type === 'skill') this.activateSkill()
     })
+  }
+
+  /** クライアントのスキル発動をホスト権威で適用(PlayerCommander.activateSkillのミラー。効果はsnapshotで相手にも反映) */
+  private activateSkill() {
+    const s = this.char.skill
+    if (this.skillCd > 0) return // 連打/不正の保険
+    this.skillCd = s.cooldown
+    this.skillActiveT = s.duration
+    this.skillKey = s.key
+    if (!this.world.headless) this.sfx.skill()
+    const fwd = new THREE.Vector3(-Math.sin(this.yaw), 0, -Math.cos(this.yaw))
+    switch (s.key) {
+      case 'dash':
+        this.dashT = 0.16; this.dashDir.copy(fwd).setY(0).normalize(); break
+      case 'cloak':
+      case 'decoy':
+        this.stealthed = true
+        if (s.key === 'decoy') {
+          const decoy = new DecoyUnit(this.world, this.combat, this.sfx, this.team, this.pos.clone(), this.char, this.yaw + Math.PI)
+          this.world.addUnit(decoy)
+        }
+        break
+      case 'repair': {
+        this.hp = Math.min(this.maxHp, this.hp + 30)
+        for (const u of this.world.units) {
+          if (u.alive && u.team === this.team && !u.isCommander && u.kind !== 'decoy' && u.group.position.distanceTo(this.pos) < 12) {
+            u.hp = Math.min(u.maxHp, u.hp + 30)
+          }
+        }
+        if (!this.world.headless) this.combat.fx.ring(this.pos.clone(), 0x6effa8)
+        break
+      }
+      case 'beatdrop': {
+        this.armorT = 0.5
+        this.combat.explode(this.pos.clone().setY(this.pos.y + 0.9), 6, 35, this.team, this, 0xc89bff)
+        break
+      }
+      case 'sonar':
+        this.world.reveal(enemyOf(this.team), s.duration); break
+      // dome / overdrive は自己バフ: skillActiveT中に takeDamage / emitShot で適用
+    }
   }
 
   /** クライアントの配備要求をホスト権威で実行(TP/同時数を検証して赤陣営トークンをspawn) */
@@ -129,8 +175,10 @@ export class RemoteCommander implements Unit {
 
   takeDamage(amount: number, from: Unit | null) {
     if (!this.alive || this.invulnT > 0) return
-    this.hp -= amount
-    this.world.notifyDamage(this, from, amount)
+    let amt = amount
+    if (this.skillActiveT > 0) { if (this.skillKey === 'dome') amt *= 0.4; else if (this.skillKey === 'dash') amt *= 0.5 } // 被ダメ軽減スキル
+    this.hp -= amt
+    this.world.notifyDamage(this, from, amt)
     if (this.hp <= 0) {
       this.alive = false
       this.world.notifyKill(this, from)
@@ -155,7 +203,14 @@ export class RemoteCommander implements Unit {
     this.invulnT = Math.max(0, this.invulnT - dt)
     this.lastFireT += dt
     this.fireCd -= dt
+    this.skillCd = Math.max(0, this.skillCd - dt)
+    this.armorT = Math.max(0, this.armorT - dt)
     this.tp = Math.min(100, this.tp + TP_REGEN_BASE * this.tpRegenMul * dt) // 配備用TP回復(コア回収はupdateCores経由)
+    // スキル持続の終了処理(cloak/decoyのステルス解除)
+    if (this.skillActiveT > 0) {
+      this.skillActiveT -= dt
+      if (this.skillActiveT <= 0 && (this.skillKey === 'cloak' || this.skillKey === 'decoy')) this.stealthed = false
+    }
 
     const ni = this.input
     if (ni) {
@@ -232,8 +287,9 @@ export class RemoteCommander implements Unit {
 
   private emitShot(moving: boolean, zoomed: boolean, sprinting: boolean) {
     const w = this.weapon
-    this.fireCd = 1 / w.rate
-    this.energy -= w.energyCost
+    const od = this.skillKey === 'overdrive' && this.skillActiveT > 0 // オーバードライブ: 連射+60%・燃費半減
+    this.fireCd = (1 / w.rate) / (od ? 1.6 : 1)
+    this.energy -= w.energyCost * (od ? 0.5 : 1)
     this.lastFireT = 0
     // 視点方向(yaw/pitch)から弾道。射撃元は目の高さから(3人称ボディ)。
     const cp = Math.cos(this.pitch)

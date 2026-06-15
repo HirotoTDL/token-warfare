@@ -95,6 +95,8 @@ export class PlayerCommander implements Unit {
   onMessage: ((msg: string) => void) | null = null
   /** オンラインclient用: 配備先(token,x,z)決定時に呼ぶ。trueを返すとローカル生成を抑止(ホスト権威でspawn) */
   onDeploy: ((tokenKey: string, x: number, z: number) => boolean) | null = null
+  /** オンラインclient用: スキル発動時に呼ぶ。trueを返すとローカル効果を抑止(ホスト権威で適用、結果はsnapshot反映) */
+  onSkill: (() => boolean) | null = null
 
   private world: World
   private combat: Combat
@@ -487,6 +489,8 @@ export class PlayerCommander implements Unit {
     this.skillCd = s.cooldown
     this.skillActiveT = s.duration
     this.sfx.skill()
+    // オンラインclient: 効果はホスト権威で適用(結果はsnapshot反映)。ローカルはcd/演出のみ(HUD維持)で実効果は抑止。
+    if (this.onSkill && this.onSkill()) return
     switch (s.key) {
       case 'dash':
         this.dashT = 0.16

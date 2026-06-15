@@ -434,6 +434,8 @@ class BattleView implements View {
       this.player.respawn(this.world.basePos.red, 0) // 赤陣スポーンへ
       // 配備はローカル生成せずホストへ要求(ホスト権威spawn→snapshotでpuppet描画)。戻り値trueでローカル抑止。
       this.player.onDeploy = (key, x, z) => { net!.transport.send('event', { type: 'deploy', key, x, z }); return true }
+      // スキルもホスト権威。効果はsnapshotで反映(ステルス等)。ローカルはcd/演出のみ(HUD維持)。
+      this.player.onSkill = () => { net!.transport.send('event', { type: 'skill' }); return true }
       this.puppets = new PuppetManager(this.world.scene)
       this.puppets.setLocalCommanderTeam('red')
       net!.transport.onMessage((ch, data: any) => {
@@ -1281,6 +1283,10 @@ window.addEventListener('resize', () => {
     c.send('event', { type: 'deploy', key: 'gunner', x: 0, z: -5 })
     for (let f = 0; f < 12; f++) { host.update(1 / 60); client.update(1 / 60) }
     const deploySpawnedToken = host.world.units.filter((u) => u.team === 'red' && !u.isCommander).length > hostRedTokBefore
+    // スキル同期: クライアントがスキル発動→ホストのRemoteCommanderが権威適用(skillCdが立つ)
+    c.send('event', { type: 'skill' })
+    for (let f = 0; f < 4; f++) { host.update(1 / 60); client.update(1 / 60) }
+    const skillActivated = (host.bot as any).skillCd > 0
     // クライアントのpuppet群(ホストの青将renji等)の位置を取得
     const pm = (client as any).puppets
     const puppetCount = (pm as any).puppets.size
@@ -1300,7 +1306,8 @@ window.addEventListener('resize', () => {
       clientVisualBolts, // ホスト発射が視覚弾としてクライアントに再生された数(>0期待)
       peakClientBolts, // 同時に飛んでいたクライアント視覚弾のピーク
       deploySpawnedToken, // クライアント配備要求→ホストがトークンspawn(true期待)
-      ok: snapsSeen > 0 && puppetCount > 0 && clientVisualBolts > 0 && deploySpawnedToken,
+      skillActivated, // クライアントのスキル発動→ホストが権威適用(true期待)
+      ok: snapsSeen > 0 && puppetCount > 0 && clientVisualBolts > 0 && deploySpawnedToken && skillActivated,
     } as any
     // 切断ハンドリング検証: クライアント切断→両者のマッチがover(フリーズしない)
     c.close()
