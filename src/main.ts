@@ -1353,6 +1353,65 @@ window.addEventListener('resize', () => {
     host.dispose(); client.dispose()
     return r
   },
+  // PvP遅延耐性検証: 片道latencyMsの決定的ループバックで host→client を回し、競技回線(数十〜百ms)で
+  // ①例外/NaNが出ない ②相手将puppetが連続的に動く(凍結/瞬間移動なし=補間が効く) ③遅延下でも発射が中継される
+  // ④自機被弾HPが同期する を確認する。実時間setTimeoutではなく論理クロック(advance)で決定的に再生。
+  netLagTest(latencyMs = 80) {
+    const [h, c] = LoopbackTransport.pair(latencyMs, true)
+    const noop = () => {}
+    const host = new BattleView({ charKey: 'renji', botLevel: 6, practice: false, mapKey: 'skyhaven' }, noop, { transport: h, role: 'host', oppCharKey: 'mimi' })
+    const client = new BattleView({ charKey: 'mimi', botLevel: 6, practice: false, mapKey: 'skyhaven' }, noop, { transport: c, role: 'client', oppCharKey: 'renji' })
+    const hc = (host as any).combat
+    const cc = (client as any).combat
+    let fireEvents = 0
+    const origFB = cc.fireBolt.bind(cc)
+    cc.fireBolt = (o: any, d: any, opts: any) => { if (opts && opts.visual) fireEvents++; return origFB(o, d, opts) }
+    const pm = (client as any).puppets
+    let ingestCount = 0
+    const origIng = pm.ingest.bind(pm)
+    pm.ingest = (s: any) => { ingestCount++; origIng(s) }
+    let nanSeen = false
+    let maxJump = 0      // 青将puppetの1フレーム水平移動量の最大(瞬間移動=補間破綻の検出)
+    let frozenFrames = 0 // バッファ充填後にpuppetがほぼ動かなかったフレーム数(凍結=バッファ枯渇の検出)
+    let prev: { x: number; z: number } | null = null
+    const blueId = host.player.id // 青将(ホスト本人)のid。これに対応するpuppetだけを追う
+    // スポーン周辺の開けた地面で半径2の円運動させる(マップのコライダーに当たらない=サンプルが連続)。
+    // 角速度2rad/s → 周速4u/s ≒ 0.067u/frame。連続運動なので補間が効けば1frジャンプは小さい。
+    const cx = host.world.basePos.blue.x, cy = host.world.basePos.blue.y, cz = host.world.basePos.blue.z
+    const dtMs = 1000 / 60
+    for (let f = 0; f < 300; f++) {
+      const t = f / 60
+      host.player.pos.set(cx + Math.sin(t * 2) * 2, cy, cz + Math.cos(t * 2) * 2)
+      if (f % 12 === 0) hc.fireBolt(host.player.pos.clone(), new THREE.Vector3(0, 0.1, 1), { damage: 8, team: 'blue', from: host.player, speed: 130, size: 0.09 })
+      if (f % 60 === 0 && host.bot.hp > 30) host.bot.hp -= 15 // client視点で自機(赤)被弾→HP同期(遅延下でも届く)
+      host.update(1 / 60); client.update(1 / 60)
+      h.advance(dtMs); c.advance(dtMs)
+      const bp = (pm as any).puppets.get(blueId)
+      const pp: any = bp ? bp.group.position : null
+      if (pp) {
+        if (isNaN(pp.x) || isNaN(pp.z)) nanSeen = true
+        if (prev && f > 60) { // 補間バッファが溜まった後のみ評価
+          const jump = Math.hypot(pp.x - prev.x, pp.z - prev.z)
+          if (jump > maxJump) maxJump = jump
+          if (jump < 1e-4) frozenFrames++
+        }
+        prev = { x: pp.x, z: pp.z }
+      }
+    }
+    const r: any = {
+      latencyMs,
+      noNaN: !nanSeen,
+      maxPuppetJumpPerFrame: +maxJump.toFixed(3), // 連続運動→小さいはず(<1.0期待)。瞬間移動があれば跳ねる
+      frozenFrames,                               // 補間が効けば0〜少数。多ければバッファ枯渇=凍結
+      ingestCount,                                // 受信スナップショット数(5s×20Hz≒100期待。激減なら送信側の問題)
+      smoothUnderLatency: maxJump < 0.5 && frozenFrames < 20,
+      relayedUnderLatency: fireEvents > 0,        // 遅延下でも発射が中継・再生された
+      clientTookDamage: client.stats.dmgTaken > 0, // 遅延下でも自機被弾HPが同期した
+    }
+    r.ok = r.noNaN && r.smoothUnderLatency && r.relayedUnderLatency && r.clientTookDamage
+    host.dispose(); client.dispose()
+    return r
+  },
 }
 
 // --- メインループ ---
