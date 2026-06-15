@@ -5,98 +5,100 @@ import { Sfx } from './sfx'
 
 interface FxItem {
   obj: THREE.Object3D
-  mat: THREE.Material & { opacity: number }
+  mat: THREE.Material & { opacity: number; color: THREE.Color }
   life: number
   maxLife: number
   baseOpacity: number
   growTo?: number
-  geo?: THREE.BufferGeometry
+  kind: string
 }
 
 export class Effects {
   private items: FxItem[] = []
   private group = new THREE.Group()
+  // GC回避: エフェクトもプールで再利用(毎ヒットの火花/毎発の発砲フラッシュ等の生成破棄を無くす)。共有ジオメトリ。
+  private pools: Record<string, { obj: THREE.Object3D; mat: THREE.Material & { opacity: number; color: THREE.Color } }[]> = {}
+  private sphereGeo = new THREE.SphereGeometry(1, 10, 8) // flash/spark/explosion 共有(scaleで調整)
+  private torusGeo = new THREE.TorusGeometry(0.5, 0.06, 8, 28)
+  private cylGeo = new THREE.CylinderGeometry(0.7, 0.9, 7, 16, 1, true)
 
   constructor(scene: THREE.Scene) {
     scene.add(this.group)
   }
 
-  private push(obj: THREE.Object3D, life: number, geo?: THREE.BufferGeometry, growTo?: number) {
-    const m = (obj as THREE.Mesh).material as FxItem['mat']
+  private take(kind: string): { obj: THREE.Object3D; mat: THREE.Material & { opacity: number; color: THREE.Color } } {
+    const pool = this.pools[kind] || (this.pools[kind] = [])
+    const e = pool.pop()
+    if (e) { e.obj.visible = true; return e }
+    let obj: THREE.Object3D
+    let mat: THREE.Material & { opacity: number; color: THREE.Color }
+    if (kind === 'tracer') {
+      const g = new THREE.BufferGeometry()
+      g.setAttribute('position', new THREE.BufferAttribute(new Float32Array(6), 3))
+      mat = new THREE.LineBasicMaterial({ transparent: true, opacity: 0.85 })
+      obj = new THREE.Line(g, mat)
+    } else {
+      const geo = kind === 'ring' ? this.torusGeo : kind === 'column' ? this.cylGeo : this.sphereGeo
+      mat = new THREE.MeshBasicMaterial({ transparent: true, opacity: 1, blending: THREE.AdditiveBlending, depthWrite: false, side: kind === 'column' ? THREE.DoubleSide : THREE.FrontSide })
+      obj = new THREE.Mesh(geo, mat)
+    }
     this.group.add(obj)
-    this.items.push({ obj, mat: m, life, maxLife: life, baseOpacity: m.opacity ?? 1, geo, growTo })
+    return { obj, mat }
+  }
+
+  private add(kind: string, obj: THREE.Object3D, mat: FxItem['mat'], life: number, baseOpacity: number, growTo?: number) {
+    this.items.push({ obj, mat, life, maxLife: life, baseOpacity, growTo, kind })
   }
 
   tracer(a: THREE.Vector3, b: THREE.Vector3, color = 0xffe9a0) {
-    const geo = new THREE.BufferGeometry().setFromPoints([a, b])
-    const mat = new THREE.LineBasicMaterial({ color, transparent: true, opacity: 0.85 })
-    this.push(new THREE.Line(geo, mat), 0.08, geo)
+    const { obj, mat } = this.take('tracer')
+    const pos = (obj as THREE.Line).geometry.attributes.position as THREE.BufferAttribute
+    pos.setXYZ(0, a.x, a.y, a.z); pos.setXYZ(1, b.x, b.y, b.z); pos.needsUpdate = true
+    ;(obj as THREE.Line).geometry.computeBoundingSphere()
+    mat.color.setHex(color); mat.opacity = 0.85
+    this.add('tracer', obj, mat, 0.08, 0.85)
   }
 
   flash(pos: THREE.Vector3, color = 0xffd080, size = 0.14) {
-    const geo = new THREE.SphereGeometry(size, 8, 6)
-    const mat = new THREE.MeshBasicMaterial({
-      color, transparent: true, opacity: 0.9, blending: THREE.AdditiveBlending, depthWrite: false,
-    })
-    mat.color.multiplyScalar(1.6)
-    const m = new THREE.Mesh(geo, mat)
-    m.position.copy(pos)
-    this.push(m, 0.06, geo)
+    const { obj, mat } = this.take('flash')
+    obj.position.copy(pos); obj.scale.setScalar(size); obj.rotation.set(0, 0, 0)
+    mat.color.setHex(color).multiplyScalar(1.6); mat.opacity = 0.9
+    this.add('flash', obj, mat, 0.06, 0.9)
   }
 
   spark(pos: THREE.Vector3, color = 0xffc080) {
-    const geo = new THREE.SphereGeometry(0.09, 6, 5)
-    const mat = new THREE.MeshBasicMaterial({
-      color, transparent: true, opacity: 0.95, blending: THREE.AdditiveBlending, depthWrite: false,
-    })
-    const m = new THREE.Mesh(geo, mat)
-    m.position.copy(pos)
-    this.push(m, 0.14, geo, 2.2)
+    const { obj, mat } = this.take('spark')
+    obj.position.copy(pos); obj.scale.setScalar(0.09); obj.rotation.set(0, 0, 0)
+    mat.color.setHex(color); mat.opacity = 0.95
+    this.add('spark', obj, mat, 0.14, 0.95, 0.2) // 元:半径0.09をscale2.2 → unit球の最終scale≈0.2
   }
 
   ring(pos: THREE.Vector3, color: number) {
-    const geo = new THREE.TorusGeometry(0.5, 0.06, 8, 28)
-    const mat = new THREE.MeshBasicMaterial({
-      color, transparent: true, opacity: 0.9, blending: THREE.AdditiveBlending, depthWrite: false,
-    })
-    const m = new THREE.Mesh(geo, mat)
-    m.position.copy(pos)
-    m.position.y += 0.1
-    m.rotation.x = -Math.PI / 2
-    this.push(m, 0.45, geo, 3.4)
+    const { obj, mat } = this.take('ring')
+    obj.position.copy(pos); obj.position.y += 0.1
+    obj.scale.setScalar(1); obj.rotation.set(-Math.PI / 2, 0, 0)
+    mat.color.setHex(color); mat.opacity = 0.9
+    this.add('ring', obj, mat, 0.45, 0.9, 3.4)
   }
 
   /** リスポーン/ワープ演出の光柱 */
   column(pos: THREE.Vector3, color: number) {
-    const geo = new THREE.CylinderGeometry(0.7, 0.9, 7, 16, 1, true)
-    const mat = new THREE.MeshBasicMaterial({
-      color, transparent: true, opacity: 0.55, blending: THREE.AdditiveBlending,
-      depthWrite: false, side: THREE.DoubleSide,
-    })
-    const m = new THREE.Mesh(geo, mat)
-    m.position.copy(pos)
-    m.position.y += 3.5
-    this.push(m, 0.7, geo)
+    const { obj, mat } = this.take('column')
+    obj.position.copy(pos); obj.position.y += 3.5
+    obj.scale.setScalar(1); obj.rotation.set(0, 0, 0)
+    mat.color.setHex(color); mat.opacity = 0.55
+    this.add('column', obj, mat, 0.7, 0.55)
   }
 
   explosion(pos: THREE.Vector3, radius: number, color = 0xff8830) {
-    const geo = new THREE.SphereGeometry(1, 16, 12)
-    const mat = new THREE.MeshBasicMaterial({
-      color, transparent: true, opacity: 0.85, blending: THREE.AdditiveBlending, depthWrite: false,
-    })
-    mat.color.multiplyScalar(2.0)
-    const m = new THREE.Mesh(geo, mat)
-    m.position.copy(pos)
-    m.scale.setScalar(0.3)
-    this.push(m, 0.35, geo, radius)
-    const geo2 = new THREE.SphereGeometry(1, 12, 8)
-    const mat2 = new THREE.MeshBasicMaterial({
-      color: 0xfff0c0, transparent: true, opacity: 0.9, blending: THREE.AdditiveBlending, depthWrite: false,
-    })
-    const m2 = new THREE.Mesh(geo2, mat2)
-    m2.position.copy(pos)
-    m2.scale.setScalar(0.2)
-    this.push(m2, 0.18, geo2, radius * 0.55)
+    const a = this.take('explosion')
+    a.obj.position.copy(pos); a.obj.scale.setScalar(0.3); a.obj.rotation.set(0, 0, 0)
+    a.mat.color.setHex(color).multiplyScalar(2.0); a.mat.opacity = 0.85
+    this.add('explosion', a.obj, a.mat, 0.35, 0.85, radius)
+    const b = this.take('explosion')
+    b.obj.position.copy(pos); b.obj.scale.setScalar(0.2); b.obj.rotation.set(0, 0, 0)
+    b.mat.color.setHex(0xfff0c0); b.mat.opacity = 0.9
+    this.add('explosion', b.obj, b.mat, 0.18, 0.9, radius * 0.55)
   }
 
   update(dt: number) {
@@ -104,9 +106,8 @@ export class Effects {
       const it = this.items[i]
       it.life -= dt
       if (it.life <= 0) {
-        this.group.remove(it.obj)
-        it.geo?.dispose()
-        it.mat.dispose()
+        it.obj.visible = false // 破棄せずプールへ返す(GC源にしない)
+        ;(this.pools[it.kind] || (this.pools[it.kind] = [])).push({ obj: it.obj, mat: it.mat })
         this.items.splice(i, 1)
         continue
       }
@@ -120,12 +121,10 @@ export class Effects {
   }
 
   dispose() {
-    for (const it of this.items) {
-      this.group.remove(it.obj)
-      it.geo?.dispose()
-      it.mat.dispose()
-    }
+    this.group.clear()
     this.items = []
+    this.pools = {}
+    this.sphereGeo.dispose(); this.torusGeo.dispose(); this.cylGeo.dispose()
   }
 }
 
