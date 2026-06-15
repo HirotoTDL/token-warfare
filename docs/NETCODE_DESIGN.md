@@ -100,3 +100,13 @@ export interface NetTransport {
 
 ## 7. firstStepNow（ユーザー判断不要・着手可）
 Phase 0 = トランスポート抽象＋`RemoteCommander`＋`LoopbackTransport`＋固定timestep累積器。ネットワーク無しでローカル検証でき、既存のオフライン挙動を壊さない可逆リファクタ。
+
+## 8. 命中処理セオリー監査の反映（2026-06-15, 情報源付きWeb調査）
+FPS打ち合い処理を業界セオリーに照らして監査(workflow `fps-combat-theory-audit`)。**核となる設計はセオリー通りで作り直し不要**。要点:
+- **可視エネルギー弾=projectile は正しい**(弾丸=hitscan / 見える遅い弾=projectile: Quake/Halo/Splatoon)。hitscan化はアンチパターン。
+- **命中=スキンドメッシュraycast→解析的ray-AABB(combat.ts `rayAabb`)は教科書通り**(判定は描画メッシュでなく簡易プリミティブ)。
+- **【Phase2方針の是正】**: 当初「弾を再現せずホスト着弾結果のみ送る」としていたが、projectileネットコードの王道は **「発射イベント(origin/dir/BoltOpts/発射時刻 ≈数十バイト)を送り全端末が決定論再生＋撃ち手はローカル予測発射、ダメージ/キル確定だけホスト権威」**。着弾結果のみ送ると反応性を捨て決定論再生の帯域利点も失う。→ Phase2は決定論再生方式へ。前提: 可変dt→固定dt、`spreadDir`の`Math.random`→共有シード。命中演出は即時/ダメージ確定は遅延(ARMAJET方式)、誤予測は敵テレポートでなく演出キャンセルで補正。
+- **lag compensation(巻き戻し)**: オンライン打ち合いの公平性の核心(Valve/VALORANT/Gambetta)。各ユニットのpos/height/radius履歴をリングバッファ(~1秒)保持し発射時刻へ巻き戻して判定、巻き戻し量に上限cap(150〜250ms)。**ただしエネルギー弾は速度有限なので厳密巻き戻しは必須でない**——TF2のロケット/グレ思想「発射を権威化し以後は決定論シム、リードを撃たせる」も有力(実装軽・peeker's advantage小)。厳密な撃ち手有利が要る武器だけ巻き戻すハイブリッドが現実的。4v4オンライン稼働まで実害なし=現計画通りPhase4で可、今はAABB履歴を取れる余地だけ空けておく。
+- **未実装の逸脱(オフラインでも価値あり)**: ヘッドショット/部位ダメージ(頭=小球2.0倍+胴=AABB1.0倍の2分割。S工数)。※TTK平均0.5sの現バランスに影響するため導入はバランス再調整とセットで判断。
+- **当面入れない(正しい判断)**: broad-phase空間分割(1v1〜4v4では総当たりで<1ms、GPP正典どおり計測でボトルネック化してから)。
+- 情報源: critpoints.net(hitscan/projectile, 弾速とキャラ速度), Valve lag compensation, Gabriel Gambetta(client prediction/server reconciliation), NeoFPS(projectileプール), Gaffer "Fix Your Timestep!", Game Programming Patterns(spatial partition)。
