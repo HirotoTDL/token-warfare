@@ -1353,11 +1353,12 @@ window.addEventListener('resize', () => {
     host.dispose(); client.dispose()
     return r
   },
-  // PvP遅延耐性検証: 片道latencyMsの決定的ループバックで host→client を回し、競技回線(数十〜百ms)で
-  // ①例外/NaNが出ない ②相手将puppetが連続的に動く(凍結/瞬間移動なし=補間が効く) ③遅延下でも発射が中継される
-  // ④自機被弾HPが同期する を確認する。実時間setTimeoutではなく論理クロック(advance)で決定的に再生。
-  netLagTest(latencyMs = 80) {
-    const [h, c] = LoopbackTransport.pair(latencyMs, true)
+  // PvP遅延/ジッタ耐性検証: 片道latencyMs+片側ジッタjitterMs(到着のバースト化=実DataChannelのhead-of-line)の
+  // 決定的ループバックで host→client を回し、競技回線で ①例外/NaNが出ない ②相手将puppetが連続的に動く
+  // (凍結/瞬間移動なし=補間が効く) ③遅延下でも発射が中継される ④自機被弾HPが同期する を確認する。
+  // 既定は 80ms+ジッタ30ms(良好な実回線相当)。実時間setTimeoutではなく論理クロック(advance)で決定的に再生。
+  netLagTest(latencyMs = 80, jitterMs = 30) {
+    const [h, c] = LoopbackTransport.pair(latencyMs, true, jitterMs)
     const noop = () => {}
     const host = new BattleView({ charKey: 'renji', botLevel: 6, practice: false, mapKey: 'skyhaven' }, noop, { transport: h, role: 'host', oppCharKey: 'mimi' })
     const client = new BattleView({ charKey: 'mimi', botLevel: 6, practice: false, mapKey: 'skyhaven' }, noop, { transport: c, role: 'client', oppCharKey: 'renji' })
@@ -1400,6 +1401,7 @@ window.addEventListener('resize', () => {
     }
     const r: any = {
       latencyMs,
+      jitterMs,
       noNaN: !nanSeen,
       maxPuppetJumpPerFrame: +maxJump.toFixed(3), // 連続運動→小さいはず(<1.0期待)。瞬間移動があれば跳ねる
       frozenFrames,                               // 補間が効けば0〜少数。多ければバッファ枯渇=凍結
