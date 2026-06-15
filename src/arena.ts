@@ -697,7 +697,19 @@ export function buildArena(world: World, mapKey = 'skyhaven', lite = false) {
           g.rotation.y = ry
           g.traverse((o) => { const m = o as THREE.Mesh; if (m.isMesh) { m.castShadow = true; m.receiveShadow = true } })
           scene.add(g)
-          if (opt.collide) { world.addCollider(aabb(x, z, opt.collide, opt.collide, opt.collide)); world.obstacleMeshes.push(g as unknown as THREE.Mesh) }
+          if (opt.collide) {
+            // 当たり判定は「単純な箱プロキシ」に統一する。移動コライダー(AABB)・弾レイ・視線レイすべてが
+            // 同じ箱で判定されるので『見た目と物理の食い違い』が無くなり、かつ重いGLBを再帰raycastせず軽い。
+            const c = opt.collide
+            g.updateMatrixWorld(true)
+            const bb = new THREE.Box3().setFromObject(g)
+            const h = Math.max(c, bb.max.y) // 高さは実モデル上端まで(弾が頭上を素抜けしない)
+            world.addCollider(aabb(x, z, c, h, c))
+            const proxy = new THREE.Mesh(new THREE.BoxGeometry(c, h, c), new THREE.MeshBasicMaterial({ visible: false }))
+            proxy.position.set(x, h / 2, z)
+            scene.add(proxy)
+            world.obstacleMeshes.push(proxy)
+          }
           if (opt.light) { const lt = new THREE.PointLight(opt.light, 7, 14, 2); lt.position.set(x, 3.0, z); scene.add(lt) }
         }
         tryPlace()

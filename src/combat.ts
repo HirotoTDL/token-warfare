@@ -219,7 +219,7 @@ export class Combat {
       this.ray.set(b.pos, dir)
       this.ray.near = 0
       this.ray.far = step
-      const obs = this.ray.intersectObjects(this.world.obstacleMeshes, true) // 再帰: GLB props(噴水/宝箱)のGroupは子Meshにジオメトリがあるため
+      const obs = this.ray.intersectObjects(this.world.obstacleMeshes, false) // 非再帰: obstacleMeshesは全て単純な箱/円柱プロキシ(軽い)
       const obsDist = obs.length ? obs[0].distance : Infinity
 
       // 敵ユニットとの交差
