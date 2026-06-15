@@ -4,9 +4,11 @@ import { Combat } from '../combat'
 import { Sfx } from '../sfx'
 import {
   ENERGY_MAX, ENERGY_CHARGE_RATE, ENERGY_PASSIVE_RATE, ENERGY_PASSIVE_DELAY, CHARGE_SPEED_MUL,
+  TP_REGEN_BASE, TEAM_COLOR,
   type CharacterDef, type Team, type Unit,
 } from '../types'
 import { buildMonsterCommander } from '../models'
+import { TOKENS, loadoutFor } from '../tokens'
 import { getModel, animateSkeleton, animateGlbBody } from '../modelLoader'
 import type { NetTransport } from './transport'
 import type { NetInput } from './netInput'
@@ -99,9 +101,26 @@ export class RemoteCommander implements Unit {
 
   /** トランスポートの 'input' チャンネルを購読してリモート入力を受け取る */
   attach(transport: NetTransport) {
-    transport.onMessage((ch, data) => {
+    transport.onMessage((ch, data: any) => {
       if (ch === 'input') this.setInput(data as NetInput)
+      else if (ch === 'event' && data && data.type === 'deploy') this.deploy(data.key, data.x, data.z)
     })
+  }
+
+  /** クライアントの配備要求をホスト権威で実行(TP/同時数を検証して赤陣営トークンをspawn) */
+  private deploy(key: string, x: number, z: number) {
+    const def = TOKENS[key]
+    if (!def || !loadoutFor(this.char.uniqueToken).includes(key)) return // 不正キー拒否
+    if (this.tp < def.cost) return
+    if (this.world.countActive(this.team, def.key) >= def.maxActive) return
+    this.tp -= def.cost
+    const pos = new THREE.Vector3(x, 0, z)
+    const facing = pos.clone().sub(this.group.position).setY(0)
+    if (facing.lengthSq() < 1e-4) facing.set(0, 0, 1)
+    facing.normalize()
+    const unit = def.spawn(this.world, this.combat, this.sfx, this.team, pos, facing)
+    this.world.addUnit(unit)
+    if (!this.world.headless) { this.combat.fx.ring(pos.clone(), TEAM_COLOR[this.team]); this.sfx.deploy() }
   }
 
   private get weapon() {
@@ -136,6 +155,7 @@ export class RemoteCommander implements Unit {
     this.invulnT = Math.max(0, this.invulnT - dt)
     this.lastFireT += dt
     this.fireCd -= dt
+    this.tp = Math.min(100, this.tp + TP_REGEN_BASE * this.tpRegenMul * dt) // 配備用TP回復(コア回収はupdateCores経由)
 
     const ni = this.input
     if (ni) {

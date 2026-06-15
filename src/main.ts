@@ -433,6 +433,8 @@ class BattleView implements View {
       // クライアント: 権威simを持たない。自機は赤陣営(host=青)。相手将/トークンはスナップショットでpuppet描画。
       this.player.team = 'red'
       this.player.respawn(this.world.basePos.red, 0) // 赤陣スポーンへ
+      // 配備はローカル生成せずホストへ要求(ホスト権威spawn→snapshotでpuppet描画)。戻り値trueでローカル抑止。
+      this.player.onDeploy = (key, x, z) => { net!.transport.send('event', { type: 'deploy', key, x, z }); return true }
       this.puppets = new PuppetManager(this.world.scene)
       this.puppets.setLocalCommanderTeam('red')
       net!.transport.onMessage((ch, data: any) => {
@@ -649,6 +651,7 @@ class BattleView implements View {
     if (me) {
       this.player.hp = me.hp
       this.player.maxHp = me.mhp
+      if (me.tp !== undefined) this.player.tp = me.tp // TPはホスト権威(配備可否・HUD表示を一致させる)
       if (!me.alive && this.player.alive) this.player.alive = false
       else if (me.alive && !this.player.alive) this.player.respawn(this.world.basePos.red, RESPAWN_INVULN)
       const drift = Math.hypot(this.player.pos.x - me.x, this.player.pos.z - me.z)
@@ -1275,6 +1278,11 @@ window.addEventListener('resize', () => {
       peakClientBolts = Math.max(peakClientBolts, cc.boltCount)
     }
     const clientVisualBolts = fireEvents // クライアントが視覚弾として再生した発射数
+    // 配備同期: クライアントが配備要求→ホストが赤陣トークンを権威spawn
+    const hostRedTokBefore = host.world.units.filter((u) => u.team === 'red' && !u.isCommander).length
+    c.send('event', { type: 'deploy', key: 'gunner', x: 0, z: -5 })
+    for (let f = 0; f < 12; f++) { host.update(1 / 60); client.update(1 / 60) }
+    const deploySpawnedToken = host.world.units.filter((u) => u.team === 'red' && !u.isCommander).length > hostRedTokBefore
     // クライアントのpuppet群(ホストの青将renji等)の位置を取得
     const pm = (client as any).puppets
     const puppetCount = (pm as any).puppets.size
@@ -1293,7 +1301,8 @@ window.addEventListener('resize', () => {
       clientPlayerTeam: client.player.team,
       clientVisualBolts, // ホスト発射が視覚弾としてクライアントに再生された数(>0期待)
       peakClientBolts, // 同時に飛んでいたクライアント視覚弾のピーク
-      ok: snapsSeen > 0 && puppetCount > 0 && clientVisualBolts > 0,
+      deploySpawnedToken, // クライアント配備要求→ホストがトークンspawn(true期待)
+      ok: snapsSeen > 0 && puppetCount > 0 && clientVisualBolts > 0 && deploySpawnedToken,
     } as any
     // 切断ハンドリング検証: クライアント切断→両者のマッチがover(フリーズしない)
     c.close()

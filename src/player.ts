@@ -93,6 +93,8 @@ export class PlayerCommander implements Unit {
   onHit: (() => void) | null = null
   onDamaged: ((amount: number) => void) | null = null
   onMessage: ((msg: string) => void) | null = null
+  /** オンラインclient用: 配備先(token,x,z)決定時に呼ぶ。trueを返すとローカル生成を抑止(ホスト権威でspawn) */
+  onDeploy: ((tokenKey: string, x: number, z: number) => boolean) | null = null
 
   private world: World
   private combat: Combat
@@ -609,6 +611,14 @@ export class PlayerCommander implements Unit {
       }
     }
 
+    // オンラインclient: ローカル生成せずホストへ配備要求(ホストが権威spawn→snapshotでpuppet描画)。TPはsnapshot権威。
+    if (this.onDeploy && this.onDeploy(def.key, target.x, target.z)) {
+      this.deploysCount++
+      this.combat.fx.ring(new THREE.Vector3(target.x, 0, target.z), TEAM_COLOR[this.team]) // 予測フィードバック(リング演出のみ)
+      this.sfx.deploy()
+      this.onMessage?.(`${def.name} 配備要求`)
+      return
+    }
     this.tp -= def.cost
     this.deploysCount++
     const facing = dir.clone().setY(0)

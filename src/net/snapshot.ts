@@ -19,6 +19,7 @@ export interface UnitSnap {
   mhp: number
   alive: boolean
   st?: boolean // stealthed
+  tp?: number // 将のTP(クライアントの自機TP HUDを権威化)
 }
 
 export interface Snapshot {
@@ -52,6 +53,7 @@ export function encodeSnapshot(units: Unit[], spheres: number[], score: [number,
       mhp: Math.round(u.maxHp),
       alive: u.alive,
       st: u.stealthed || undefined,
+      tp: u.isCommander ? Math.round((u as any).tp ?? 0) : undefined,
     })
   }
   return { t, units: us, spheres, score, timer }
