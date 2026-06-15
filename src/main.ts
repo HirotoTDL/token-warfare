@@ -1491,6 +1491,69 @@ window.addEventListener('resize', () => {
     host.dispose(); client.dispose()
     return r
   },
+  // PvP持続的整合性(soak)検証: 遅延+ジッタ下で host+client を長時間(既定30s分=1800f)回し、
+  // 経時バグ(同期ズレの蓄積/NaN/ユニット・puppetのリーク/例外)が無いことを通しで確認する総仕上げテスト。
+  // ホストのスコアを段階的に増やしてスコア同期経路も持続負荷下で検証。入力はグローバルを一時操作し必ず復元。
+  netSoakTest(latencyMs = 60, jitterMs = 30, frames = 1800) {
+    const [h, c] = LoopbackTransport.pair(latencyMs, true, jitterMs)
+    const noop = () => {}
+    const host = new BattleView({ charKey: 'renji', botLevel: 6, practice: false, mapKey: 'skyhaven' }, noop, { transport: h, role: 'host', oppCharKey: 'mimi' })
+    const client = new BattleView({ charKey: 'mimi', botLevel: 6, practice: false, mapKey: 'skyhaven' }, noop, { transport: c, role: 'client', oppCharKey: 'renji' })
+    const pm = (client as any).puppets
+    let ingestCount = 0
+    const origIng = pm.ingest.bind(pm)
+    pm.ingest = (s: any) => { ingestCount++; origIng(s) }
+    const startUnits = host.world.units.length
+    let nanSeen = false, maxScoreDiv = 0, maxTimerDiv = 0, maxUnits = startUnits, maxPuppets = 0
+    const savedKeys = [...input.keys]
+    const dtMs = 1000 / 60
+    try {
+      for (let f = 0; f < frames; f++) {
+        // 入力: スポーン近傍の開けた地面で小さく往復+時々発砲(戦闘負荷)。yawは緩く旋回。
+        input.keys.clear()
+        if ((f % 80) < 40) input.keys.add('KeyW'); else input.keys.add('KeyS')
+        if ((f % 140) < 70) input.keys.add('KeyD'); else input.keys.add('KeyA')
+        input.mouseDown = (f % 30) < 6 // 散発的に発砲
+        client.player.yaw = Math.sin(f / 110) * 0.4
+        // ホストの占領カウント(権威の蓄積元。scoresはここからfloorで導出される)を段階的に増やして占領を模擬。
+        // CAPTURE_TO_WIN=30未満に留めて途中終了を避ける。
+        if (f > 0 && f % 240 === 0) {
+          const oc = (host as any).objectives.count
+          oc.blue = Math.min(8, Math.floor(oc.blue) + 1)
+          if (f % 480 === 0) oc.red = Math.min(6, Math.floor(oc.red) + 1)
+        }
+        host.update(1 / 60); client.update(1 / 60)
+        h.advance(dtMs); c.advance(dtMs)
+        if (f > 60) { // 定常化後に整合性を計測(クライアントは~遅延分だけ遅れて追従)
+          const cp = client.player.pos
+          if (isNaN(cp.x) || isNaN(cp.z)) nanSeen = true
+          const sd = Math.abs(client.scores.blue - host.scores.blue) + Math.abs(client.scores.red - host.scores.red)
+          maxScoreDiv = Math.max(maxScoreDiv, sd)
+          maxTimerDiv = Math.max(maxTimerDiv, Math.abs(client.timer - host.timer))
+          maxUnits = Math.max(maxUnits, host.world.units.length)
+          maxPuppets = Math.max(maxPuppets, (pm as any).puppets.size)
+        }
+      }
+    } finally {
+      input.mouseDown = false
+      input.keys.clear(); for (const k of savedKeys) input.keys.add(k)
+    }
+    const r: any = {
+      frames, latencyMs, jitterMs,
+      noNaN: !nanSeen,
+      maxScoreDiv,                                 // スコア同期のズレ最大(遅延分のみ=小。≤2期待。増え続けるなら同期破綻)
+      maxTimerDivS: +maxTimerDiv.toFixed(3),       // タイマー同期のズレ最大(s)。遅延+1スナップ間隔程度(<0.5期待)
+      ingestCount,                                 // 受信スナップショット数(frames/3≒20Hz相当。途切れなく流れたか)
+      unitLeak: maxUnits - startUnits,             // ユニット数の増分(配備していないので0期待=リーク無し)
+      maxPuppets,                                  // クライアントpuppet数の最大(青将のみ=1期待。増殖=削除漏れ)
+      finalScores: { host: { ...host.scores }, client: { ...client.scores } },
+      // 通しで安定: NaN無し・スコア/タイマーのズレが遅延相当に収まる・リーク無し・puppet増殖無し
+      stable: !nanSeen && maxScoreDiv <= 2 && maxTimerDiv < 0.5 && (maxUnits - startUnits) === 0 && maxPuppets <= 1,
+    }
+    r.ok = r.stable && ingestCount > frames / 6 // スナップショットが継続して流れている
+    host.dispose(); client.dispose()
+    return r
+  },
   // 接続タイムアウト検証(手動プローブ): 無効な部屋コードへ短いタイムアウトで参加し、無限スピナーにならず
   // 必ず reject する(timeout か peer-unavailable)ことを確認。実PeerJSブローカーへ繋ぐためネットワーク必須=okスイート外。
   netTimeoutProbe(timeoutMs = 2500) {
