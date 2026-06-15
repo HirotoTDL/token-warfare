@@ -134,7 +134,9 @@ export function buildArena(world: World, mapKey = 'skyhaven', lite = false) {
   const crystal = mapKey === 'crystalsprings'
 
   // 空気遠近: 近景はクリア、遠景は緩やかに霞ませて広大な奥行きを出す
-  scene.fog = new THREE.Fog(crystal ? 0xd6f0ff : dusk ? 0xd98aa6 : 0xf0dcec, 130, 760)
+  // near=130はプレイ範囲(半径40)に全く掛からず中景が平坦だった(gfx-02)。near/farを前倒しして
+  // 中〜遠景に空気遠近を与え奥行きを出す。近景(占領/弾)は素通しなので視認性は保つ。
+  scene.fog = new THREE.Fog(crystal ? 0xd6f0ff : dusk ? 0xd98aa6 : 0xf0dcec, 48, 360)
 
   // --- ライティング ---
   const sunDir = new THREE.Vector3(40, dusk ? 30 : 62, 26)
