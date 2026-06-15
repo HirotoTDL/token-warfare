@@ -911,6 +911,12 @@ window.addEventListener('resize', () => {
       view.render()
     }
   },
+  // マップ俯瞰デバッグビュー(レーン/カバー配置の検証用)。topView(h)で高さh真上から、topView(0)で解除。
+  // 永続モード: メインループが描画を切り替えるので、rAFに上書きされず撮影できる。
+  topView(h = 78) {
+    ;(window as any).__topH = h
+    return true
+  },
 }
 
 // --- メインループ ---
@@ -922,7 +928,16 @@ renderer.setAnimationLoop(() => {
   try {
     const dt = Math.min(0.05, clock.getDelta())
     view.update(dt)
-    view.render()
+    const th = (window as any).__topH as number | undefined
+    if (th && battle) {
+      const cam = new THREE.PerspectiveCamera(60, window.innerWidth / window.innerHeight, 1, 400)
+      cam.up.set(0, 0, -1) // -Z(赤陣)を上に
+      cam.position.set(0, th, 0.001)
+      cam.lookAt(0, 0, 0)
+      postfx.render(battle.world.scene, cam)
+    } else {
+      view.render()
+    }
     input.endFrame()
     // --- 動的解像度 ---
     perfAcc += dt; perfN++; perfWin += dt
