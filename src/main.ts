@@ -637,6 +637,7 @@ class BattleView implements View {
       [this.scores.blue, this.scores.red],
       this.timer,
       this.t,
+      this.suddenDeath,
     )
     this.net.transport.send('state', snap)
   }
@@ -654,6 +655,18 @@ class BattleView implements View {
     this.scores.blue = snap.score[0]
     this.scores.red = snap.score[1]
     this.timer = snap.timer
+    // 試合フェーズ(OT/サドンデス)の告知はホスト権威simの中だけで鳴っていてクライアントに来ていなかった。
+    // snapshotのtimer/sdから遷移を検出し、クライアントでも告知バナー+BGM+SEを鳴らす(HUDのOT/SD表示もthis.suddenDeathに依存)。
+    const wasSudden = this.suddenDeath
+    this.suddenDeath = !!snap.sd
+    if (this.suddenDeath && !wasSudden) {
+      this.hud.warn('🔥 サドンデス — 先にカウントを進めた方が勝ち!', 4)
+      sfx.overtime(); bgm.play('overtime')
+    } else if (!this.overtimeAnnounced && !this.suddenDeath && this.timer <= OVERTIME_AT) {
+      this.overtimeAnnounced = true
+      this.hud.warn('⚡ OVERTIME — TP回復2倍・コア増加!', 3)
+      sfx.overtime(); bgm.play('overtime')
+    }
     // スフィアの見た目をchargeで反映(視覚のみ)
     const o = this.objectives
     o.center.charge = snap.spheres[0]; o.base.blue.charge = snap.spheres[1]; o.base.red.charge = snap.spheres[2]
@@ -1362,6 +1375,10 @@ window.addEventListener('resize', () => {
     c.send('event', { type: 'skill' })
     for (let f = 0; f < 4; f++) { host.update(1 / 60); client.update(1 / 60) }
     const skillActivated = (host.bot as any).skillCd > 0
+    // サドンデス同期: ホストがサドンデス突入→snapshot.sd→クライアントもsuddenDeath化(HUDのSD表示・告知)
+    ;(host as any).suddenDeath = true
+    for (let f = 0; f < 8; f++) { host.update(1 / 60); client.update(1 / 60) }
+    const suddenDeathSynced = (client as any).suddenDeath === true
     // マッチ終了同期: ホストの終了通知(占領達成/時間切れ等)→クライアントも確定スコアで終了
     // 併せて勝敗ジングルの視点を検証: client=赤で blue30>red5 は敗北→finish()は'lose'を鳴らすべき
     // (旧実装はblue視点固定で'win'が鳴り勝敗の音が逆転していた)。bgm.jingleを一時フックして捕捉。
@@ -1395,10 +1412,11 @@ window.addEventListener('resize', () => {
       redTokenBoltRelayed, // 自軍(赤)トークンの弾も相手画面に中継される(true期待)
       ownCommanderBoltNotRelayed, // 自機将の弾は中継しない=二重描画回避(true期待)
       skillActivated, // クライアントのスキル発動→ホストが権威適用(true期待)
+      suddenDeathSynced, // ホストのサドンデス→snapshot.sd→クライアントも同期(true期待)
       matchEndSynced, // ホストの終了通知→クライアントも終了(true期待)
       clientLossPerspective, // 自陣(赤)視点で敗北ジングルが鳴る=勝敗の音が逆転しない(true期待)
       clientCombatFeedback: { dealt: Math.round(client.stats.dmgDealt), taken: Math.round(client.stats.dmgTaken) }, // 相手被弾→dealt, 自機被弾→taken(両>0期待)
-      ok: snapsSeen > 0 && puppetCount > 0 && clientVisualBolts > 0 && deploySpawnedToken && redTokenBoltRelayed && ownCommanderBoltNotRelayed && skillActivated && matchEndSynced && clientLossPerspective && client.stats.dmgDealt > 0 && client.stats.dmgTaken > 0,
+      ok: snapsSeen > 0 && puppetCount > 0 && clientVisualBolts > 0 && deploySpawnedToken && redTokenBoltRelayed && ownCommanderBoltNotRelayed && skillActivated && suddenDeathSynced && matchEndSynced && clientLossPerspective && client.stats.dmgDealt > 0 && client.stats.dmgTaken > 0,
     } as any
     // 切断ハンドリング検証: クライアント切断→両者のマッチがover(フリーズしない)
     c.close()

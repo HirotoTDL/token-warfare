@@ -28,10 +28,11 @@ export interface Snapshot {
   spheres: number[] // [center, blueBase, redBase] の charge[-1,1]
   score: [number, number] // [blue, red]
   timer: number
+  sd?: boolean // サドンデス中か(クライアントのフェーズ告知/HUD表示用。ホスト権威)
 }
 
 /** ホストのworld/objectivesから現在のスナップショットを作る(権威側で毎送信フレーム呼ぶ) */
-export function encodeSnapshot(units: Unit[], spheres: number[], score: [number, number], timer: number, t: number): Snapshot {
+export function encodeSnapshot(units: Unit[], spheres: number[], score: [number, number], timer: number, t: number, sd = false): Snapshot {
   const us: UnitSnap[] = []
   for (const u of units) {
     if (!u.alive && u.kind === 'commander') {
@@ -56,7 +57,7 @@ export function encodeSnapshot(units: Unit[], spheres: number[], score: [number,
       tp: u.isCommander ? Math.round((u as any).tp ?? 0) : undefined,
     })
   }
-  return { t, units: us, spheres, score, timer }
+  return { t, units: us, spheres, score, timer, sd: sd || undefined }
 }
 
 interface Sample {
