@@ -613,8 +613,12 @@ class BattleView implements View {
     if (this.over) return
     this.over = true
     this.endTimer = 1.2
-    sfx.sting(this.scores.blue >= this.scores.red)
-    bgm.jingle(this.scores.blue === this.scores.red ? 'draw' : this.scores.blue > this.scores.red ? 'win' : 'lose')
+    // 勝敗のSE/ジングルは「自分の陣営」視点で鳴らす(オンラインclient=赤では blue>=red 固定だと勝敗が逆転していた)。
+    // host/オフラインは player.team='blue' なので従来どおり。
+    const myScore = this.player.team === 'blue' ? this.scores.blue : this.scores.red
+    const theirScore = this.player.team === 'blue' ? this.scores.red : this.scores.blue
+    sfx.sting(myScore >= theirScore)
+    bgm.jingle(myScore === theirScore ? 'draw' : myScore > theirScore ? 'win' : 'lose')
     input.exitLock()
     // ホスト権威: あらゆる終了条件(占領達成/時間切れ/サドンデス)をクライアントへ伝える(クライアントの取りこぼし防止)
     if (this.isHost && this.net) this.net.transport.send('event', { type: 'matchEnd', score: [this.scores.blue, this.scores.red] })
@@ -1340,9 +1344,16 @@ window.addEventListener('resize', () => {
     for (let f = 0; f < 4; f++) { host.update(1 / 60); client.update(1 / 60) }
     const skillActivated = (host.bot as any).skillCd > 0
     // マッチ終了同期: ホストの終了通知(占領達成/時間切れ等)→クライアントも確定スコアで終了
+    // 併せて勝敗ジングルの視点を検証: client=赤で blue30>red5 は敗北→finish()は'lose'を鳴らすべき
+    // (旧実装はblue視点固定で'win'が鳴り勝敗の音が逆転していた)。bgm.jingleを一時フックして捕捉。
+    let clientEndJingle: string | null = null
+    const origJingle = (bgm as any).jingle.bind(bgm)
+    ;(bgm as any).jingle = (k: string) => { clientEndJingle = k; return origJingle(k) }
     h.send('event', { type: 'matchEnd', score: [30, 5] })
     for (let f = 0; f < 4; f++) { host.update(1 / 60); client.update(1 / 60) }
+    ;(bgm as any).jingle = origJingle
     const matchEndSynced = client.over === true && client.scores.blue === 30
+    const clientLossPerspective = clientEndJingle === 'lose' // 自陣(赤)視点で敗北の音が鳴る(true期待)
     // クライアントのpuppet群(ホストの青将renji等)の位置を取得
     const pm = (client as any).puppets
     const puppetCount = (pm as any).puppets.size
@@ -1366,8 +1377,9 @@ window.addEventListener('resize', () => {
       ownCommanderBoltNotRelayed, // 自機将の弾は中継しない=二重描画回避(true期待)
       skillActivated, // クライアントのスキル発動→ホストが権威適用(true期待)
       matchEndSynced, // ホストの終了通知→クライアントも終了(true期待)
+      clientLossPerspective, // 自陣(赤)視点で敗北ジングルが鳴る=勝敗の音が逆転しない(true期待)
       clientCombatFeedback: { dealt: Math.round(client.stats.dmgDealt), taken: Math.round(client.stats.dmgTaken) }, // 相手被弾→dealt, 自機被弾→taken(両>0期待)
-      ok: snapsSeen > 0 && puppetCount > 0 && clientVisualBolts > 0 && deploySpawnedToken && redTokenBoltRelayed && ownCommanderBoltNotRelayed && skillActivated && matchEndSynced && client.stats.dmgDealt > 0 && client.stats.dmgTaken > 0,
+      ok: snapsSeen > 0 && puppetCount > 0 && clientVisualBolts > 0 && deploySpawnedToken && redTokenBoltRelayed && ownCommanderBoltNotRelayed && skillActivated && matchEndSynced && clientLossPerspective && client.stats.dmgDealt > 0 && client.stats.dmgTaken > 0,
     } as any
     // 切断ハンドリング検証: クライアント切断→両者のマッチがover(フリーズしない)
     c.close()
