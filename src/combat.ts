@@ -148,8 +148,6 @@ interface Bolt {
   traveled: number
   opts: BoltOpts
   mesh: THREE.Mesh
-  geo: THREE.BufferGeometry
-  mat: THREE.MeshBasicMaterial
   alive: boolean
 }
 
@@ -158,6 +156,13 @@ export class Combat {
   private ray = new THREE.Raycaster()
   private bolts: Bolt[] = []
   private boltGroup = new THREE.Group()
+  // --- GC回避: 弾はプールで再利用し、毎発の生成破棄を無くす(打ち合い時のGCスパイク解消) ---
+  private boltGeo = new THREE.SphereGeometry(1, 8, 6) // 全弾共有の単位球(meshをsizeでスケール)
+  private boltPool: Bolt[] = [] // 非アクティブな弾(mesh/pos/vel を保持して再利用)
+  private matCache = new Map<number, THREE.MeshBasicMaterial>() // 色→共有マテリアル(生成は色ごと一度きり)
+  private tmpDir = new THREE.Vector3()
+  private tmpV = new THREE.Vector3()
+  private hitMeshes: THREE.Mesh[] = [] // ユニット交差判定用の使い回し配列
 
   constructor(
     public world: World,
@@ -167,36 +172,41 @@ export class Combat {
     world.scene.add(this.boltGroup)
   }
 
+  private boltMaterial(color: number): THREE.MeshBasicMaterial {
+    let m = this.matCache.get(color)
+    if (!m) {
+      m = new THREE.MeshBasicMaterial({ color, transparent: true, opacity: 0.95, blending: THREE.AdditiveBlending, depthWrite: false })
+      m.color.multiplyScalar(2.6) // HDR輝度に押し上げてブルームで光らせる
+      this.matCache.set(color, m)
+    }
+    return m
+  }
+
   /** エネルギー弾を発射(spreadは呼び出し側でdirに適用済みであること) */
   fireBolt(origin: THREE.Vector3, dir: THREE.Vector3, opts: BoltOpts) {
-    const d = dir.clone().normalize()
+    const d = this.tmpDir.copy(dir).normalize()
     const size = opts.size ?? 0.09
-    const geo = new THREE.SphereGeometry(size, 8, 6)
-    const mat = new THREE.MeshBasicMaterial({
-      color: opts.color ?? 0xffe9a0,
-      transparent: true,
-      opacity: 0.95,
-      blending: THREE.AdditiveBlending,
-      depthWrite: false,
-    })
-    mat.color.multiplyScalar(2.6) // HDR輝度に押し上げてブルームで光らせる
-    const mesh = new THREE.Mesh(geo, mat)
-    mesh.position.copy(origin)
-    // 進行方向に引き伸ばして光条に見せる
+    const color = opts.color ?? 0xffe9a0
     const stretch = Math.min(6, 1.5 + opts.speed * 0.025)
-    mesh.scale.set(1, 1, stretch)
-    mesh.lookAt(origin.clone().add(d))
-    this.boltGroup.add(mesh)
-    this.bolts.push({
-      pos: origin.clone(),
-      vel: d.multiplyScalar(opts.speed),
-      traveled: 0,
-      opts,
-      mesh,
-      geo,
-      mat,
-      alive: true,
-    })
+    let b = this.boltPool.pop()
+    if (!b) {
+      // プールが空なら1個だけ生成(以降は再利用される)
+      const mesh = new THREE.Mesh(this.boltGeo, this.boltMaterial(color))
+      this.boltGroup.add(mesh)
+      b = { pos: new THREE.Vector3(), vel: new THREE.Vector3(), traveled: 0, opts, mesh, alive: true }
+    }
+    b.mesh.material = this.boltMaterial(color)
+    b.mesh.visible = true
+    b.mesh.position.copy(origin)
+    b.mesh.scale.set(size, size, size * stretch)
+    this.tmpV.copy(origin).add(d)
+    b.mesh.lookAt(this.tmpV)
+    b.pos.copy(origin)
+    b.vel.copy(d).multiplyScalar(opts.speed)
+    b.traveled = 0
+    b.opts = opts
+    b.alive = true
+    this.bolts.push(b)
   }
 
   /** 拡散角を加えた方向ベクトルを作るユーティリティ */
@@ -213,7 +223,7 @@ export class Combat {
       const b = this.bolts[i]
       if (b.opts.gravity) b.vel.y -= b.opts.gravity * dt
       const step = b.vel.length() * dt
-      const dir = b.vel.clone().normalize()
+      const dir = this.tmpDir.copy(b.vel).normalize() // clone回避(使い回し)
 
       // 障害物との交差
       this.ray.set(b.pos, dir)
@@ -222,10 +232,11 @@ export class Combat {
       const obs = this.ray.intersectObjects(this.world.obstacleMeshes, false) // 非再帰: obstacleMeshesは全て単純な箱/円柱プロキシ(軽い)
       const obsDist = obs.length ? obs[0].distance : Infinity
 
-      // 敵ユニットとの交差
-      const meshes: THREE.Mesh[] = []
+      // 敵ユニットとの交差(配列は使い回し=毎フレームの確保を回避)
+      const meshes = this.hitMeshes
+      meshes.length = 0
       for (const u of this.world.units) {
-        if (u.alive && u.team !== b.opts.team && u !== b.opts.from) meshes.push(...u.hitMeshes)
+        if (u.alive && u.team !== b.opts.team && u !== b.opts.from) { for (const hm of u.hitMeshes) meshes.push(hm) }
       }
       const hits = this.ray.intersectObjects(meshes, false)
       const unitDist = hits.length ? hits[0].distance : Infinity
@@ -263,10 +274,10 @@ export class Combat {
       if (sphere) {
         const dmg = b.opts.damage * (b.opts.falloff ? falloffMul(b.opts.falloff, b.traveled) : 1)
         if (b.opts.explosive) {
-          this.explode(b.pos.clone(), b.opts.explosive.radius, dmg, b.opts.team, b.opts.from)
+          this.explode(this.tmpV.copy(b.pos), b.opts.explosive.radius, dmg, b.opts.team, b.opts.from)
         } else {
           sphere.damage(b.opts.team, dmg)
-          this.fx.spark(b.pos.clone(), b.opts.color ?? 0xff9060)
+          this.fx.spark(this.tmpV.copy(b.pos), b.opts.color ?? 0xff9060)
         }
         this.killBolt(i)
         continue
@@ -275,7 +286,7 @@ export class Combat {
       b.pos.addScaledVector(dir, step)
       b.traveled += step
       b.mesh.position.copy(b.pos)
-      if (b.opts.gravity) b.mesh.lookAt(b.pos.clone().add(b.vel))
+      if (b.opts.gravity) b.mesh.lookAt(this.tmpV.copy(b.pos).add(b.vel))
       const maxRange = b.opts.maxRange ?? 110
       if (b.traveled > maxRange || b.pos.y < -10) {
         // 爆発弾がmaxRange到達(=届かず飛びすぎ)で消える場合は不発にせず着弾点で爆発させる。
@@ -291,10 +302,10 @@ export class Combat {
 
   private killBolt(i: number) {
     const b = this.bolts[i]
-    this.boltGroup.remove(b.mesh)
-    b.geo.dispose()
-    b.mat.dispose()
+    b.mesh.visible = false // groupには残し非表示(再利用。add/removeのchurnも回避)。dispose しない=GC源にならない
+    b.alive = false
     this.bolts.splice(i, 1)
+    this.boltPool.push(b)
   }
 
   /** 爆発。team の敵にのみダメージ(距離減衰あり) */
@@ -318,11 +329,11 @@ export class Combat {
   }
 
   dispose() {
-    for (const b of this.bolts) {
-      this.boltGroup.remove(b.mesh)
-      b.geo.dispose()
-      b.mat.dispose()
-    }
+    this.boltGroup.clear()
     this.bolts = []
+    this.boltPool = []
+    this.boltGeo.dispose()
+    for (const m of this.matCache.values()) m.dispose()
+    this.matCache.clear()
   }
 }
