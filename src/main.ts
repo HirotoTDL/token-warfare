@@ -360,6 +360,8 @@ class BattleView implements View {
   private clientSphereOwner: Record<string, Team | null> = {} // client: 各スフィアの前回所有者(確保/被奪取の遷移検出用)
   private clientSpheresSeen = false // client: スフィア所有者を1度記録したか(初回はバナーを鳴らさない)
   private clientDeadCountdown: number | null = null // client: 死亡中のリスポーン残り秒(ローカル推定。実復帰はsnapshotのme.alive)
+  private clientLastScoreBlue = 0 // client: 前回スコア(占領カウント加算トーストの検出用)
+  private clientLastScoreRed = 0
   over = false
   everLocked = false
   timer = MATCH_TIME
@@ -670,6 +672,15 @@ class BattleView implements View {
       this.hud.warn('⚡ OVERTIME — TP回復2倍・コア増加!', 3)
       sfx.overtime(); bgm.play('overtime')
     }
+    // momentum(逆転ブースト)指標と占領カウント加算トーストもホスト限定だった→クライアントでも反映。
+    // momentumはHUD表示専用(実TPはsnapshot権威)。client=赤が劣勢+OTで tpRegenMul を上げ指標を点灯させる。
+    const otMul = this.timer <= OVERTIME_AT ? 2 : 1
+    this.player.tpRegenMul = (this.scores.red < this.scores.blue ? TP_MOMENTUM_MUL : 1) * otMul
+    // 占領カウントが増えた瞬間に一瞬トースト(scoreプレートと同じblue-red順で一貫)
+    if (snap.score[0] > this.clientLastScoreBlue || snap.score[1] > this.clientLastScoreRed) {
+      this.hud.warn(`占領カウント ${snap.score[0]} - ${snap.score[1]}`, 1)
+    }
+    this.clientLastScoreBlue = snap.score[0]; this.clientLastScoreRed = snap.score[1]
     // スフィアの見た目をchargeで反映(視覚のみ)
     const o = this.objectives
     o.center.charge = snap.spheres[0]; o.base.blue.charge = snap.spheres[1]; o.base.red.charge = snap.spheres[2]
@@ -1410,6 +1421,12 @@ window.addEventListener('resize', () => {
     for (let f = 0; f < 8; f++) { host.update(1 / 60); client.update(1 / 60) }
     ;(client as any).hud.killBanner = origKB
     const clientSphereCaptureFeedback = !!clientSphereBanner && /確保/.test(clientSphereBanner.msg) && clientSphereBanner.good === true
+    // momentum指標(client): blueがリード=red(client本人)が劣勢→client側で tpRegenMul が上がりHUDのmomentumが点灯する
+    ;(host as any).objectives.count.blue = 5
+    for (let f = 0; f < 6; f++) { host.update(1 / 60); client.update(1 / 60) }
+    const clientMomentumWhenBehind = (client as any).player.tpRegenMul > 1
+    ;(host as any).objectives.count.blue = 0 // スコアを同点に戻す(後続のサドンデス検証は同点が前提=非同点だとhostが即finishする)
+    for (let f = 0; f < 4; f++) { host.update(1 / 60); client.update(1 / 60) }
     // 死亡/リスポーンのクライアントHUD: ホストでclient将(RemoteCommander赤)を死亡→clientにリスポーンカウントダウン、復帰でクリア
     ;(host.bot as any).alive = false
     for (let f = 0; f < 6; f++) { host.update(1 / 60); client.update(1 / 60) }
@@ -1455,13 +1472,14 @@ window.addEventListener('resize', () => {
       ownCommanderBoltNotRelayed, // 自機将の弾は中継しない=二重描画回避(true期待)
       skillActivated, // クライアントのスキル発動→ホストが権威適用(true期待)
       clientSphereCaptureFeedback, // クライアントがスフィア確保時にバナー/SEを鳴らす(true期待)
+      clientMomentumWhenBehind, // 劣勢時にmomentum指標が点灯(client tpRegenMul>1, true期待)
       clientDeathCountdown, // 死亡中にリスポーンカウントダウンがHUDに出る(true期待)
       clientRespawnCleared, // 復帰でカウントダウンがクリアされ生存(true期待)
       suddenDeathSynced, // ホストのサドンデス→snapshot.sd→クライアントも同期(true期待)
       matchEndSynced, // ホストの終了通知→クライアントも終了(true期待)
       clientLossPerspective, // 自陣(赤)視点で敗北ジングルが鳴る=勝敗の音が逆転しない(true期待)
       clientCombatFeedback: { dealt: Math.round(client.stats.dmgDealt), taken: Math.round(client.stats.dmgTaken) }, // 相手被弾→dealt, 自機被弾→taken(両>0期待)
-      ok: snapsSeen > 0 && puppetCount > 0 && clientVisualBolts > 0 && deploySpawnedToken && redTokenBoltRelayed && ownCommanderBoltNotRelayed && skillActivated && clientSphereCaptureFeedback && clientDeathCountdown && clientRespawnCleared && suddenDeathSynced && matchEndSynced && clientLossPerspective && client.stats.dmgDealt > 0 && client.stats.dmgTaken > 0,
+      ok: snapsSeen > 0 && puppetCount > 0 && clientVisualBolts > 0 && deploySpawnedToken && redTokenBoltRelayed && ownCommanderBoltNotRelayed && skillActivated && clientSphereCaptureFeedback && clientMomentumWhenBehind && clientDeathCountdown && clientRespawnCleared && suddenDeathSynced && matchEndSynced && clientLossPerspective && client.stats.dmgDealt > 0 && client.stats.dmgTaken > 0,
     } as any
     // 切断ハンドリング検証: クライアント切断→両者のマッチがover(フリーズしない)
     c.close()
