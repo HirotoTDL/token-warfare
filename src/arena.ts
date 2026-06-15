@@ -389,19 +389,14 @@ export function buildArena(world: World, mapKey = 'skyhaven', lite = false) {
     gateParts.push(beam)
     craftedSwap(gateParts, 'struct_gate', 0, 0, 5.6, 0, 0)
     emblemAt(0, 3.6, 0)
-    // 側道フィールドのクレート群
-    crate(16, 5, 2.2); crate(-16, -5, 2.2)
-    crate(16, -5, 2.0); crate(-16, 5, 2.0)
+    // 側道の実体カバー(乱立させず、側道を縁取る連続壁＋要所のブロックだけ)。点対称。
+    wall(16, 0, 0.9, 10, 2.4); wall(-16, 0, 0.9, 10, 2.4)   // 側道の内壁(大通りと側道を分ける)
     crate(23, 11, 2.4); crate(-23, -11, 2.4)
-    crate(23, -11, 1.8); crate(-23, 11, 1.8)
+    crate(23, -11, 2.4); crate(-23, 11, 2.4)
     crate(13, 20, 2.0); crate(-13, -20, 2.0)
-    crate(13.8, 20.7, 1.1); crate(-13.8, -20.7, 1.1)
     // コーナーバリケード
     wall(27, 22, 6, 0.9, 2.2); wall(-27, -22, 6, 0.9, 2.2)
     wall(27, -22, 6, 0.9, 2.2); wall(-27, 22, 6, 0.9, 2.2)
-    // 大通り出入口のバレル
-    barrel(0, 18.5); barrel(1.2, 19.3); barrel(0, -18.5); barrel(-1.2, -19.3)
-    barrel(20, 0); barrel(-20, 0)
     world.coreSpots = [
       new THREE.Vector3(0, 0, 16), new THREE.Vector3(0, 0, -16),
       new THREE.Vector3(17, 0, 0), new THREE.Vector3(-17, 0, 0),
@@ -427,16 +422,13 @@ export function buildArena(world: World, mapKey = 'skyhaven', lite = false) {
     wall(10, 10, 0.9, 8, 2.4); wall(-10, -10, 0.9, 8, 2.4)
     wall(10, -10, 8, 0.9, 2.4); wall(-10, 10, 8, 0.9, 2.4)
     // 外周の散開クレート
+    // 散開カバー(乱立させず、要所の実体ブロックだけ。点対称で対角の長射線を切る)
     crate(16, 4, 2.2); crate(-16, -4, 2.2)
     crate(6, 18, 2.0); crate(-6, -18, 2.0)
     crate(22, -14, 2.4); crate(-22, 14, 2.4)
-    crate(24, 12, 1.8); crate(-24, -12, 1.8)
-    crate(14, -22, 2.0); crate(-14, 22, 2.0)
-    crate(15.6, 4.4, 1.1); crate(-15.6, -4.4, 1.1)
-    // コーナーバリケード+バレル(4隅を点対称に=開けた対角の長射線を分断/カバー量を他Map並みに field-05)
+    // コーナーバリケード(4隅を点対称に=開けた対角の長射線を分断)
     wall(27, 22, 6, 0.9, 2.2); wall(-27, -22, 6, 0.9, 2.2)
     wall(27, -22, 6, 0.9, 2.2); wall(-27, 22, 6, 0.9, 2.2)
-    barrel(12, 12); barrel(-12, -12); barrel(0, 20); barrel(0, -20)
     world.coreSpots = [
       new THREE.Vector3(0, 0, 15), new THREE.Vector3(0, 0, -15),
       new THREE.Vector3(18, 0, 0), new THREE.Vector3(-18, 0, 0),
