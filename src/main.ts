@@ -356,7 +356,6 @@ class BattleView implements View {
   private snapAcc = 0 // host: スナップショット送信間隔の累積
   private inSeq = 0 // client: 入力連番
   private lastSnap: Snapshot | null = null // client: 直近受信スナップ(未適用)
-  private snapInterp = 0 // client: 受信間の補間進捗
   over = false
   everLocked = false
   timer = MATCH_TIME
@@ -637,7 +636,6 @@ class BattleView implements View {
     const snap = this.lastSnap
     if (!snap) return
     this.lastSnap = null
-    this.snapInterp = 0
     this.puppets?.ingest(snap)
     this.scores.blue = snap.score[0]
     this.scores.red = snap.score[1]
@@ -790,8 +788,8 @@ class BattleView implements View {
     this.fx.update(udt)
     this.combat.update(udt)
     this.popups.update(udt)
-    // クライアント: 相手/トークンpuppetを受信間で補間。ホスト: 20Hzでスナップショット配信。
-    if (this.isClient && this.puppets) { this.snapInterp = Math.min(1, this.snapInterp + dt * 12); this.puppets.update(this.snapInterp) }
+    // クライアント: 相手/トークンpuppetをrender-behind補間で描画。ホスト: 20Hzでスナップショット配信。
+    if (this.isClient && this.puppets) this.puppets.update(dt)
     if (this.isHost) this.hostNetUpdate(dt)
 
     if (!this.over) {

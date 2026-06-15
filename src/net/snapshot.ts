@@ -59,17 +59,17 @@ export function encodeSnapshot(units: Unit[], spheres: number[], score: [number,
   return { t, units: us, spheres, score, timer }
 }
 
+interface Sample {
+  t: number // クライアント補間クロックでの受信時刻
+  x: number
+  y: number
+  z: number
+  yaw: number
+}
 interface Puppet {
   group: THREE.Group
-  lastX: number
-  lastY: number
-  lastZ: number
-  lastYaw: number
-  tgtX: number
-  tgtY: number
-  tgtZ: number
-  tgtYaw: number
-  seen: number // 最終受信スナップのt(未受信=削除判定用)
+  buffer: Sample[] // 受信サンプル列(render-behind補間用。古い順)
+  seen: number // 最終受信のクロック(未受信=削除判定用)
   hp: number
   mhp: number
   fill: THREE.Sprite // HPバーの残量(scale.xで増減・色で残量表現)
@@ -85,6 +85,8 @@ export class PuppetManager {
   private puppets = new Map<number, Puppet>()
   private group = new THREE.Group()
   private localTeam: Team | null = null // この陣営の将=自機(クライアント本人)なのでpuppet化しない
+  private clock = 0 // クライアント補間用クロック(update(dt)で進む)
+  private readonly interpDelay = 0.1 // render-behind量(s)。受信間より大きく取りジッタ/欠落を吸収して滑らかに描く
 
   constructor(scene: THREE.Scene) {
     scene.add(this.group)
@@ -111,15 +113,15 @@ export class PuppetManager {
         const bar = this.buildHpBar(u.kind)
         model.add(bar.group)
         this.group.add(model)
-        p = { group: model, lastX: u.x, lastY: u.y, lastZ: u.z, lastYaw: u.yaw, tgtX: u.x, tgtY: u.y, tgtZ: u.z, tgtYaw: u.yaw, seen: snap.t, hp: u.hp, mhp: u.mhp, fill: bar.fill, fillMat: bar.fillMat }
+        p = { group: model, buffer: [], seen: this.clock, hp: u.hp, mhp: u.mhp, fill: bar.fill, fillMat: bar.fillMat }
         this.puppets.set(u.id, p)
         model.position.set(u.x, u.y, u.z)
         model.rotation.y = u.yaw
       }
-      // 現在位置を「前回」に、新規受信を「目標」に(update()で補間)
-      p.lastX = p.group.position.x; p.lastY = p.group.position.y; p.lastZ = p.group.position.z; p.lastYaw = p.group.rotation.y
-      p.tgtX = u.x; p.tgtY = u.y; p.tgtZ = u.z; p.tgtYaw = u.yaw
-      p.seen = snap.t
+      // 受信サンプルをクライアントクロックでスタンプしてバッファへ(update()がinterpDelay分だけ過去を再生)
+      p.buffer.push({ t: this.clock, x: u.x, y: u.y, z: u.z, yaw: u.yaw })
+      if (p.buffer.length > 8) p.buffer.shift()
+      p.seen = this.clock
       p.hp = u.hp; p.mhp = u.mhp
       p.group.visible = u.alive
     }
@@ -132,18 +134,32 @@ export class PuppetManager {
     }
   }
 
-  /** 毎フレーム: 受信間を補間して滑らかに移動させる(render-behind簡易補間) */
-  update(lerp: number) {
-    const k = Math.min(1, lerp)
+  /** 毎フレーム: render-behind補間で滑らかに描画する(interpDelay分だけ過去の2サンプル間を線形補間) */
+  update(dt: number) {
+    this.clock += dt
+    const renderT = this.clock - this.interpDelay
     for (const p of this.puppets.values()) {
-      p.group.position.x += (p.tgtX - p.group.position.x) * k
-      p.group.position.y += (p.tgtY - p.group.position.y) * k
-      p.group.position.z += (p.tgtZ - p.group.position.z) * k
-      let d = (p.tgtYaw - p.group.rotation.y) % (Math.PI * 2)
-      if (d > Math.PI) d -= Math.PI * 2
-      if (d < -Math.PI) d += Math.PI * 2
-      p.group.rotation.y += d * k
-      // HPバー: 残量で幅(中央アンカー)と色(緑→黄→赤)を更新(Spriteは常にカメラを向く。頭上x=z=0なので回転に強い)
+      const buf = p.buffer
+      if (buf.length > 0) {
+        // renderTを挟む2サンプルを探す(古い順)。無ければ端にクランプ。
+        let a = buf[0]
+        let b = buf[buf.length - 1]
+        if (renderT <= buf[0].t) { a = b = buf[0] } // バッファより過去(まだ溜まっていない)→最古へ
+        else if (renderT >= buf[buf.length - 1].t) { a = b = buf[buf.length - 1] } // 最新を追い越し(欠落)→最新で停止
+        else {
+          for (let i = 0; i < buf.length - 1; i++) {
+            if (renderT >= buf[i].t && renderT <= buf[i + 1].t) { a = buf[i]; b = buf[i + 1]; break }
+          }
+        }
+        const span = b.t - a.t
+        const f = span > 1e-5 ? Math.max(0, Math.min(1, (renderT - a.t) / span)) : 0
+        p.group.position.set(a.x + (b.x - a.x) * f, a.y + (b.y - a.y) * f, a.z + (b.z - a.z) * f)
+        let d = (b.yaw - a.yaw) % (Math.PI * 2)
+        if (d > Math.PI) d -= Math.PI * 2
+        if (d < -Math.PI) d += Math.PI * 2
+        p.group.rotation.y = a.yaw + d * f
+      }
+      // HPバー: 残量で幅(中央アンカー)と色(緑→黄→赤)を更新(Spriteは常にカメラ向き。頭上x=z=0で回転に強い)
       const ratio = Math.max(0, Math.min(1, p.mhp > 0 ? p.hp / p.mhp : 0))
       p.fill.scale.x = Math.max(0.001, 1.0 * ratio)
       p.fillMat.color.setRGB(ratio < 0.5 ? 1 : 2 * (1 - ratio), ratio > 0.5 ? 1 : 2 * ratio, 0.15)
