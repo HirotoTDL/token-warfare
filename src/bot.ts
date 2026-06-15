@@ -447,6 +447,7 @@ export class BotCommander implements Unit {
     }
     this.combat.fx.flash(muzzlePos, 0xffb080, 0.1)
     this.sfx.shotFar(0.13)
+    this.group.userData.recoil = 1 // 発砲リコイル(animateSkeletonが上体/銃腕へ反映、updateで減衰)
   }
 
   /** ゾーン制圧: 今このボットが確保すべきスフィア(優先: 中央→敵陣→自陣防衛)。無ければnull(支配中) */
@@ -553,6 +554,10 @@ export class BotCommander implements Unit {
 
   /** 移動速度に応じた歩行アニメ */
   private updateWalkAnim(dt: number) {
+    // 過渡モーション(発砲リコイル/被弾フリンチ)の減衰
+    const ud = this.group.userData
+    if (ud.recoil) ud.recoil = Math.max(0, ud.recoil - dt * 9)
+    if (ud.flinch) ud.flinch = Math.max(0, ud.flinch - dt * 4.5)
     const anim = this.group.userData.anim as { legs: THREE.Group[]; arms: THREE.Group[] } | undefined
     const p = this.group.position
     if (!this.animPrev) this.animPrev = p.clone()
@@ -780,6 +785,7 @@ export class BotCommander implements Unit {
     this.regenDelay = 6
     this.lastDamaged = 0
     this.flashT = 0.09
+    this.group.userData.flinch = 1 // 被弾フリンチ(animateSkeletonが上体に反映、updateで減衰)
     for (const p of this.flashPairs) {
       p.m.emissive.setHex(0xffffff)
       p.m.emissiveIntensity = 0.7

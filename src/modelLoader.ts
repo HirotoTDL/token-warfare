@@ -201,6 +201,11 @@ export function animateSkeleton(
   add('Head', 'y', cy * 0.15)
   add('Spine02', 'x', cp * 0.3)
   add('Head', 'x', cp * 0.7)
+  // === 過渡レイヤー: 発砲リコイル / 被弾フリンチ(group.userDataにbot/tokenがセット、各自で減衰) ===
+  const recoil = (group.userData.recoil as number) || 0
+  if (recoil) { add('R_Upperarm', 'x', recoil * 0.5); add('Spine02', 'x', -recoil * 0.08) } // 銃腕の反動キック＋上体わずかに後ろ
+  const flinch = (group.userData.flinch as number) || 0
+  if (flinch) { add('Spine01', 'x', flinch * 0.22); add('Head', 'x', flinch * 0.12) } // 被弾で上体を一瞬のけ反らせる(+x=後ろ)
 }
 
 /**
