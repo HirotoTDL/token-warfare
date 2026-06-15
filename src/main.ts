@@ -359,6 +359,7 @@ class BattleView implements View {
   private lastOppHp = 99999 // client: 相手将の前回HP(被弾→ヒットマーカー判定用)
   private clientSphereOwner: Record<string, Team | null> = {} // client: 各スフィアの前回所有者(確保/被奪取の遷移検出用)
   private clientSpheresSeen = false // client: スフィア所有者を1度記録したか(初回はバナーを鳴らさない)
+  private clientDeadCountdown: number | null = null // client: 死亡中のリスポーン残り秒(ローカル推定。実復帰はsnapshotのme.alive)
   over = false
   everLocked = false
   timer = MATCH_TIME
@@ -702,8 +703,15 @@ class BattleView implements View {
       this.player.hp = me.hp
       this.player.maxHp = me.mhp
       if (me.tp !== undefined) this.player.tp = me.tp // TPはホスト権威(配備可否・HUD表示を一致させる)
-      if (!me.alive && this.player.alive) this.player.alive = false
-      else if (me.alive && !this.player.alive) this.player.respawn(this.world.basePos.red, RESPAWN_INVULN)
+      if (!me.alive && this.player.alive) {
+        this.player.alive = false
+        // 死亡→ローカルでリスポーンカウントダウン開始(HUD表示用。実復帰はsnapshotのme.aliveで反映)
+        this.clientDeadCountdown = this.timer <= OVERTIME_AT ? RESPAWN_TIME_OT : RESPAWN_TIME
+      } else if (me.alive && !this.player.alive) {
+        this.player.respawn(this.world.basePos.red, RESPAWN_INVULN)
+        this.clientDeadCountdown = null
+        this.hud.message(`リスポーン — ${RESPAWN_INVULN}秒無敵`, 2)
+      }
       const drift = Math.hypot(this.player.pos.x - me.x, this.player.pos.z - me.z)
       if (drift > 3) this.player.pos.set(me.x, this.player.pos.y, me.z)
     }
@@ -731,6 +739,8 @@ class BattleView implements View {
 
     // クライアントは権威simを持たない: 入力送信＋受信スナップショット適用(スコア/タイマー/相手puppet/自機補正)
     if (this.isClient) this.clientNetUpdate(dt)
+    // 死亡中のリスポーンカウントダウンを毎フレーム減算(HUD表示用。clientNetUpdateはsnapshot無いフレームは早期returnするため別途)
+    if (this.isClient && this.clientDeadCountdown !== null) this.clientDeadCountdown = Math.max(0, this.clientDeadCountdown - dt)
 
     if (!this.over && !this.isClient) {
       // スフィア占領カウント更新(中央＋敵陣を確保している側が加算)
@@ -868,7 +878,7 @@ class BattleView implements View {
           momentum: this.player.tpRegenMul > (this.timer <= OVERTIME_AT ? 2 : 1),
           overtime: this.timer <= OVERTIME_AT && !this.suddenDeath,
           suddenDeath: this.suddenDeath,
-          deadCountdown: this.respawnT.blue ?? null,
+          deadCountdown: this.isClient ? this.clientDeadCountdown : (this.respawnT.blue ?? null),
           slots: this.player.loadout.map((k) => ({
             def: TOKENS[k],
             count: this.world.countActive('blue', k),
@@ -1400,6 +1410,13 @@ window.addEventListener('resize', () => {
     for (let f = 0; f < 8; f++) { host.update(1 / 60); client.update(1 / 60) }
     ;(client as any).hud.killBanner = origKB
     const clientSphereCaptureFeedback = !!clientSphereBanner && /確保/.test(clientSphereBanner.msg) && clientSphereBanner.good === true
+    // 死亡/リスポーンのクライアントHUD: ホストでclient将(RemoteCommander赤)を死亡→clientにリスポーンカウントダウン、復帰でクリア
+    ;(host.bot as any).alive = false
+    for (let f = 0; f < 6; f++) { host.update(1 / 60); client.update(1 / 60) }
+    const clientDeathCountdown = (client as any).clientDeadCountdown > 0 // 死亡中にカウントダウンが出る(true期待)
+    ;(host.bot as any).alive = true
+    for (let f = 0; f < 6; f++) { host.update(1 / 60); client.update(1 / 60) }
+    const clientRespawnCleared = (client as any).clientDeadCountdown === null && client.player.alive // 復帰でクリア+生存(true期待)
     // サドンデス同期: ホストがサドンデス突入→snapshot.sd→クライアントもsuddenDeath化(HUDのSD表示・告知)
     ;(host as any).suddenDeath = true
     for (let f = 0; f < 8; f++) { host.update(1 / 60); client.update(1 / 60) }
@@ -1438,11 +1455,13 @@ window.addEventListener('resize', () => {
       ownCommanderBoltNotRelayed, // 自機将の弾は中継しない=二重描画回避(true期待)
       skillActivated, // クライアントのスキル発動→ホストが権威適用(true期待)
       clientSphereCaptureFeedback, // クライアントがスフィア確保時にバナー/SEを鳴らす(true期待)
+      clientDeathCountdown, // 死亡中にリスポーンカウントダウンがHUDに出る(true期待)
+      clientRespawnCleared, // 復帰でカウントダウンがクリアされ生存(true期待)
       suddenDeathSynced, // ホストのサドンデス→snapshot.sd→クライアントも同期(true期待)
       matchEndSynced, // ホストの終了通知→クライアントも終了(true期待)
       clientLossPerspective, // 自陣(赤)視点で敗北ジングルが鳴る=勝敗の音が逆転しない(true期待)
       clientCombatFeedback: { dealt: Math.round(client.stats.dmgDealt), taken: Math.round(client.stats.dmgTaken) }, // 相手被弾→dealt, 自機被弾→taken(両>0期待)
-      ok: snapsSeen > 0 && puppetCount > 0 && clientVisualBolts > 0 && deploySpawnedToken && redTokenBoltRelayed && ownCommanderBoltNotRelayed && skillActivated && clientSphereCaptureFeedback && suddenDeathSynced && matchEndSynced && clientLossPerspective && client.stats.dmgDealt > 0 && client.stats.dmgTaken > 0,
+      ok: snapsSeen > 0 && puppetCount > 0 && clientVisualBolts > 0 && deploySpawnedToken && redTokenBoltRelayed && ownCommanderBoltNotRelayed && skillActivated && clientSphereCaptureFeedback && clientDeathCountdown && clientRespawnCleared && suddenDeathSynced && matchEndSynced && clientLossPerspective && client.stats.dmgDealt > 0 && client.stats.dmgTaken > 0,
     } as any
     // 切断ハンドリング検証: クライアント切断→両者のマッチがover(フリーズしない)
     c.close()
