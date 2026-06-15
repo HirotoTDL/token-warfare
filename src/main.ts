@@ -876,6 +876,7 @@ class BattleView implements View {
 let view: View = new MenuView()
 let battle: BattleView | null = null
 let lastChar = 'renji'
+let lastWasOnline = false // 直前の対戦がオンラインだったか(リザルトの再戦ボタンの分岐用。P2P接続は試合後切れるので再戦はロビーへ)
 let pendingMode: { botLevel: number; practice: boolean } = { botLevel: 6, practice: false }
 let pendingMap = 'skyhaven'
 
@@ -886,6 +887,7 @@ input.onLockChange = (locked) => {
 
 function startBattle(charKey: string, net: { transport: NetTransport; role: NetRole; oppCharKey: string } | null = null) {
   lastChar = charKey
+  lastWasOnline = net != null
   view.dispose()
   const myTeam: Team = net?.role === 'client' ? 'red' : 'blue' // オンラインclientは赤陣営
   battle = new BattleView(
@@ -917,6 +919,8 @@ function startBattle(charKey: string, net: { transport: NetTransport; role: NetR
         : win
           ? '盤面とエイム、両方の勝利だ。'
           : '盤面を立て直し、コアを制せ。'
+      // オンライン対戦はP2P接続が試合後に切れるため、即時再戦はできない→再戦ボタンを「ロビーへ」に変える(オフラインは「再戦」のまま)
+      document.getElementById('btn-rematch')!.textContent = lastWasOnline ? 'ロビーへ' : '再戦'
       showScreen('result')
     },
     net,
@@ -1174,7 +1178,16 @@ document.getElementById('btn-start')!.addEventListener('click', () => {
 })
 document.getElementById('btn-rematch')!.addEventListener('click', () => {
   sfx.unlock()
-  startBattle(lastChar)
+  if (lastWasOnline) {
+    // オンライン対戦の再戦: P2P接続は終了済みなので、黙ってオフライン戦を始めず再接続のためロビーへ戻す。
+    pendingNet = null
+    pendingNetSortie = null
+    lobbyCleanup()
+    lobbyReset()
+    showScreen('lobby')
+  } else {
+    startBattle(lastChar)
+  }
 })
 document.getElementById('btn-reselect')!.addEventListener('click', () => {
   sfx.unlock()
