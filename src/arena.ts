@@ -153,7 +153,13 @@ export function buildArena(world: World, mapKey = 'skyhaven', lite = false) {
   sun.shadow.bias = -0.0004
   sun.shadow.normalBias = 0.03 // スリム体型のセルフシャドウのアクネ(縞)を抑制
   scene.add(sun)
-  scene.add(new THREE.HemisphereLight(crystal ? 0xd2f2ff : dusk ? 0x9a86c8 : 0xc8d8f5, crystal ? 0x9cc8e4 : dusk ? 0x55384a : 0x5a4a50, crystal ? 0.9 : dusk ? 0.75 : 0.8))
+  // フィル光(空/地)。コントラストを稼ぐため強度をやや下げる(0.8→0.6台)。フィルが強すぎると平坦化する。
+  scene.add(new THREE.HemisphereLight(crystal ? 0xd2f2ff : dusk ? 0x9a86c8 : 0xc8d8f5, crystal ? 0x9cc8e4 : dusk ? 0x55384a : 0x5a4a50, crystal ? 0.66 : dusk ? 0.55 : 0.6))
+  // リム/バックライト: キー(sun)と反対側・やや上から色付きで当て、キャラ/プロップの輪郭を背景から浮かせる
+  // (スタイライズドの華やかさはリム光の存在感で決まる。castShadow=falseで負荷増なし)。
+  const rim = new THREE.DirectionalLight(crystal ? 0xbfefff : dusk ? 0xff8ec0 : 0x9fc4ff, dusk ? 0.7 : 0.55)
+  rim.position.set(-34, 30, -28)
+  scene.add(rim)
 
   // --- 浮遊島本体 ---
   const groundMat = new THREE.MeshStandardMaterial({
