@@ -211,16 +211,45 @@ export function buildArena(world: World, mapKey = 'skyhaven', lite = false) {
       // 4種すべて読込完了を待ってから一括配置
       if (!getScenery('scatter_grass') || !getScenery('scatter_flowers') || !getScenery('scatter_mushroom') || !getScenery('scatter_rock')) return
       scatterDone = true
-      for (const p of plan) {
-        const g = getScenery(p.key)
-        if (!g) continue
-        const bb = new THREE.Box3().setFromObject(g)
-        const hNow = bb.max.y - bb.min.y
-        g.scale.setScalar((p.s) / Math.max(0.3, hNow))
-        g.position.set(p.x, -0.05, p.z)
-        g.rotation.y = p.ry
-        g.traverse((o) => { const m = o as THREE.Mesh; if (m.isMesh) m.castShadow = true })
-        scene.add(g)
+      // 散布物は InstancedMesh で描画する。個別メッシュ(数百)だとドローコールがメインスレッド(1コア)を飽和させ、
+      // 打ち合い時の処理落ちの主因になる。種類×サブメッシュ単位の数個のInstancedMeshへ集約。
+      // 草花は castShadow=false(影は不要かつ影パスを倍化させる)。
+      const types = ['scatter_grass', 'scatter_flowers', 'scatter_mushroom', 'scatter_rock']
+      const counts: Record<string, number> = {}
+      for (const p of plan) counts[p.key] = (counts[p.key] || 0) + 1
+      const tmpObj = new THREE.Object3D()
+      const m4 = new THREE.Matrix4()
+      for (const key of types) {
+        const tmpl = getScenery(key)
+        const n = counts[key] || 0
+        if (!tmpl || !n) continue
+        tmpl.updateMatrixWorld(true)
+        const bb = new THREE.Box3().setFromObject(tmpl)
+        const hNow = Math.max(0.3, bb.max.y - bb.min.y) // 高さ正規化用(元GLBの自然高)
+        const subs: { geo: THREE.BufferGeometry; mat: THREE.Material | THREE.Material[]; local: THREE.Matrix4 }[] = []
+        tmpl.traverse((o) => { const mm = o as THREE.Mesh; if (mm.isMesh) subs.push({ geo: mm.geometry, mat: mm.material, local: mm.matrixWorld.clone() }) })
+        if (!subs.length) continue
+        const ims = subs.map((sub) => {
+          const im = new THREE.InstancedMesh(sub.geo, sub.mat as THREE.Material, n)
+          im.castShadow = false; im.receiveShadow = false
+          scene.add(im)
+          return im
+        })
+        let i = 0
+        for (const p of plan) {
+          if (p.key !== key) continue
+          const sf = p.s / hNow
+          tmpObj.position.set(p.x, -0.05, p.z)
+          tmpObj.rotation.set(0, p.ry, 0)
+          tmpObj.scale.set(sf, sf, sf)
+          tmpObj.updateMatrix()
+          for (let si = 0; si < subs.length; si++) {
+            m4.multiplyMatrices(tmpObj.matrix, subs[si].local)
+            ims[si].setMatrixAt(i, m4)
+          }
+          i++
+        }
+        for (const im of ims) im.instanceMatrix.needsUpdate = true
       }
     }
     placeScatter()
