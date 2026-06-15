@@ -41,6 +41,9 @@ renderer.setPixelRatio(BASE_PR)
 renderer.setSize(window.innerWidth, window.innerHeight)
 renderer.shadowMap.enabled = true
 renderer.shadowMap.type = THREE.PCFSoftShadowMap
+// 計測用: autoResetを切りフレーム先頭で手動resetする。これでScene本描画＋PostFX全パスのdraw call合計を
+// __tw.perf で読める(既定はrender()毎にresetされ最終合成パスの1だけが残ってしまう)。
+renderer.info.autoReset = false
 // ACESFilmicは広ガモット圧縮で鮮やかな色が灰がかる(washed-out)=スタイライズドが安っぽく見える主因。
 // Khronos PBR Neutralはガモット内で色相を保ったままハイライトを処理し、妖精/クリスタルの原色が映える。
 renderer.toneMapping = THREE.NeutralToneMapping
@@ -362,6 +365,16 @@ class BattleView implements View {
   /** チュートリアルTIP(最初の3試合のみ、各1回) */
   private tipsEnabled = false
   private tipsShown = new Set<string>()
+
+  /** 計測用(__tw.perf): 弾/エフェクト/ユニット数。プールが伸び続けないことの確認に使う */
+  debugPerf() {
+    return {
+      bolts: this.combat.boltCount,
+      boltPool: this.combat.boltPoolSize,
+      fx: this.fx.fxCount,
+      units: this.world.units.length,
+    }
+  }
 
   constructor(public config: MatchConfig, private onEnd: (scores: Record<Team, number>) => void) {
     this.arena = buildArena(this.world, config.mapKey)
@@ -917,6 +930,22 @@ window.addEventListener('resize', () => {
     ;(window as any).__topH = h
     return true
   },
+  // 計測ファースト: 最適化の前後を数値で比較する。draw call数/三角形/弾・fx数とフレーム時間p50/p95/maxを返す。
+  // 打ち合い中に呼んで、p95やmaxが跳ねていない=スパイクが無いことを確認する。
+  perf() {
+    const r = renderer.info.render
+    const s = frameMs.slice().sort((a, b) => a - b)
+    const at = (q: number) => (s.length ? s[Math.min(s.length - 1, Math.floor(s.length * q))] : 0)
+    const round = (x: number) => Math.round(x * 10) / 10
+    return {
+      drawCalls: r.calls,
+      triangles: r.triangles,
+      qScale: round(qScale),
+      frameMs: { p50: round(at(0.5)), p95: round(at(0.95)), max: round(s[s.length - 1] || 0), n: s.length },
+      fps: round(1000 / Math.max(0.001, at(0.5))),
+      ...(battle ? battle.debugPerf() : {}),
+    }
+  },
 }
 
 // --- メインループ ---
@@ -924,9 +953,14 @@ const clock = new THREE.Clock()
 // 動的解像度コントローラ: 0.5秒窓の平均フレーム時間を見て、重ければ解像度を下げ軽ければ戻す。
 // 高性能機は常時フル、非力機は自動で軽くなり処理落ちを避ける(見た目より滑らかさを優先する局面のみ作動)。
 let perfWin = 0, perfAcc = 0, perfN = 0, perfWarmup = 3
+// 計測用フレーム時間リング(__tw.perf で p50/p95/max を読む)。打ち合い前後のスパイク有無を数値で確認するため
+const frameMs: number[] = []
 renderer.setAnimationLoop(() => {
   try {
     const dt = Math.min(0.05, clock.getDelta())
+    frameMs.push(dt * 1000)
+    if (frameMs.length > 180) frameMs.shift()
+    renderer.info.reset() // フレーム先頭でreset→このフレームの全パスのdraw callが info.render に積算される
     view.update(dt)
     const th = (window as any).__topH as number | undefined
     if (th && battle) {

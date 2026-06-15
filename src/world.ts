@@ -12,11 +12,21 @@ export class NavGrid {
   half: number
   n: number
   blocked: Uint8Array
+  // BFS用の使い回しバッファ(毎呼び出しの new Int32Array(n*n) を根絶=findPathのGC源/確保スパイク解消)。
+  // 世代カウンタ方式: visited[i]===gen で訪問済み判定し .fill() も不要。
+  private prevBuf: Int32Array
+  private visBuf: Int32Array
+  private queueBuf: Int32Array
+  private gen = 0
 
   constructor(half: number) {
     this.half = half
     this.n = Math.floor((half * 2) / this.cell)
     this.blocked = new Uint8Array(this.n * this.n)
+    const sz = this.n * this.n
+    this.prevBuf = new Int32Array(sz)
+    this.visBuf = new Int32Array(sz)
+    this.queueBuf = new Int32Array(sz)
   }
 
   clear() {
@@ -73,24 +83,32 @@ export class NavGrid {
     const start = sz * n + sx
     const goal = tz * n + tx
     if (start === goal) return [to.clone()]
-    const prev = new Int32Array(n * n).fill(-1)
+    // 使い回しバッファ＋世代カウンタでBFS(毎回の new Int32Array(n*n) / fill を回避)
+    const prev = this.prevBuf
+    const vis = this.visBuf
+    const queue = this.queueBuf
+    const gen = ++this.gen
+    let qHead = 0
+    let qTail = 0
+    vis[start] = gen
     prev[start] = start
-    const queue = [start]
+    queue[qTail++] = start
     const dirs = [1, -1, n, -n, n + 1, n - 1, -n + 1, -n - 1]
-    for (let qi = 0; qi < queue.length && qi < 4000; qi++) {
-      const cur = queue[qi]
+    while (qHead < qTail && qHead < 4000) {
+      const cur = queue[qHead++]
       if (cur === goal) break
       const cx = cur % n
       for (const d of dirs) {
         const nxt = cur + d
         if (nxt < 0 || nxt >= n * n) continue
         if (Math.abs((nxt % n) - cx) > 1) continue
-        if (this.blocked[nxt] || prev[nxt] !== -1) continue
+        if (this.blocked[nxt] || vis[nxt] === gen) continue
+        vis[nxt] = gen
         prev[nxt] = cur
-        queue.push(nxt)
+        queue[qTail++] = nxt
       }
     }
-    if (prev[goal] === -1) return null
+    if (vis[goal] !== gen) return null
     const path: THREE.Vector3[] = []
     let cur = goal
     while (cur !== start) {
@@ -153,6 +171,7 @@ export class World {
 
   private nextId = 1
   private ray = new THREE.Raycaster()
+  private _losDir = new THREE.Vector3() // hasLOS用スクラッチ(毎呼び出しのclone確保を回避)
 
   allocId() {
     return this.nextId++
@@ -236,7 +255,7 @@ export class World {
 
   /** a→b の射線が障害物に遮られていないか */
   hasLOS(a: THREE.Vector3, b: THREE.Vector3): boolean {
-    const dir = b.clone().sub(a)
+    const dir = this._losDir.copy(b).sub(a)
     const dist = dir.length()
     if (dist < 0.01) return true
     dir.normalize()

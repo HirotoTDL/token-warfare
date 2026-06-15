@@ -123,6 +123,7 @@ export class BotCommander implements Unit {
   private charging = false
   private prevTargetPos = new THREE.Vector3()
   private targetVel = new THREE.Vector3()
+  private _acqTgt = new THREE.Vector3() // acquireTargetの敵ごとLOS判定用スクラッチ(per-enemy cloneを回避)
   private aimErr = 0
   private aimYaw = 0 // 上体エイムの残差ヨー(胴体facing後の頭/胸の向き調整)
   private aimPitch = 0 // 上体エイムのピッチ(狙いの上下。+で標的が上)
@@ -344,7 +345,7 @@ export class BotCommander implements Unit {
       if (u.stealthed) continue
       const d = flatDist(u.group.position, this.group.position)
       if (d > 55) continue
-      const tgt = u.group.position.clone()
+      const tgt = this._acqTgt.copy(u.group.position)
       tgt.y += u.height * 0.6
       if (!this.world.hasLOS(eye, tgt)) continue
       let score = -d
@@ -790,7 +791,8 @@ export class BotCommander implements Unit {
       p.m.emissive.setHex(0xffffff)
       p.m.emissiveIntensity = 0.7
     }
-    this.retargetT = Math.min(this.retargetT, 0.1)
+    // 被弾時は再取得を早めるが、戦闘中に全botが10HzでhasLOS走査する暴走を避けるため下限0.2s(約5Hz)に留める
+    this.retargetT = Math.min(this.retargetT, 0.2)
     // 見えない敵からの被弾は横っ飛びで回避(棒立ち狙撃され対策)
     if (!this.target && this.dashT <= 0) {
       const ang = Math.random() * Math.PI * 2

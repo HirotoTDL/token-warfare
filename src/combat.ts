@@ -26,6 +26,9 @@ export class Effects {
     scene.add(this.group)
   }
 
+  /** 計測用(__tw.perf): 生存中エフェクト数 */
+  get fxCount() { return this.items.length }
+
   private take(kind: string): { obj: THREE.Object3D; mat: THREE.Material & { opacity: number; color: THREE.Color } } {
     const pool = this.pools[kind] || (this.pools[kind] = [])
     const e = pool.pop()
@@ -163,6 +166,10 @@ export class Combat {
   private tmpV = new THREE.Vector3()
   private hitMeshes: THREE.Mesh[] = [] // ユニット交差判定用の使い回し配列
 
+  /** 計測用(__tw.perf): アクティブ弾数 / プール退避数。プールが青天井に伸びていなければリーク無し */
+  get boltCount() { return this.bolts.length }
+  get boltPoolSize() { return this.boltPool.length }
+
   constructor(
     public world: World,
     public fx: Effects,
@@ -292,7 +299,7 @@ export class Combat {
         // 場外へ落下(y<-10)した場合は虚空なので爆発しない(PHYS-08: 曲射の不発感を解消)。
         if (b.opts.explosive && b.traveled > maxRange && b.pos.y > 0) {
           const dmg = b.opts.damage * (b.opts.falloff ? falloffMul(b.opts.falloff, b.traveled) : 1)
-          this.explode(b.pos.clone(), b.opts.explosive.radius, dmg, b.opts.team, b.opts.from)
+          this.explode(this.tmpV.copy(b.pos), b.opts.explosive.radius, dmg, b.opts.team, b.opts.from)
         }
         this.killBolt(i)
       }
