@@ -356,6 +356,7 @@ class BattleView implements View {
   private snapAcc = 0 // host: スナップショット送信間隔の累積
   private inSeq = 0 // client: 入力連番
   private lastSnap: Snapshot | null = null // client: 直近受信スナップ(未適用)
+  private lastOppHp = 99999 // client: 相手将の前回HP(被弾→ヒットマーカー判定用)
   over = false
   everLocked = false
   timer = MATCH_TIME
@@ -647,8 +648,16 @@ class BattleView implements View {
     o.center.charge = snap.spheres[0]; o.base.blue.charge = snap.spheres[1]; o.base.red.charge = snap.spheres[2]
     for (const s of o.spheres) s.update(_dt)
     // 自機(赤将)の権威状態を反映(HP/生存)＋大きくドリフトしたら位置を引き戻す
+    // 相手将(青)のHPが下がった=自分が当てた → ヒットマーカー(1v1なのでほぼ自分の戦果。dmgDealt集計も)
+    const opp = snap.units.find((u) => u.kind === 'commander' && u.team === 'blue')
+    if (opp) {
+      if (opp.hp < this.lastOppHp && this.lastOppHp < 99999) { this.hud.hitmarker(); sfx.hitmarker(); this.stats.dmgDealt += this.lastOppHp - opp.hp }
+      this.lastOppHp = opp.hp
+    }
     const me = snap.units.find((u) => u.kind === 'commander' && u.team === 'red')
     if (me) {
+      // 被弾フィードバック: HPが下がっていたら被ダメ演出(画面フラッシュ/シェイク)を起動(snapshot直書きだと無音だった)
+      if (me.hp < this.player.hp) { const d = this.player.hp - me.hp; this.player.onDamaged?.(d); this.stats.dmgTaken += d }
       this.player.hp = me.hp
       this.player.maxHp = me.mhp
       if (me.tp !== undefined) this.player.tp = me.tp // TPはホスト権威(配備可否・HUD表示を一致させる)
@@ -1259,9 +1268,9 @@ window.addEventListener('resize', () => {
     const noop = () => {}
     const host = new BattleView({ charKey: 'renji', botLevel: 6, practice: false, mapKey: 'skyhaven' }, noop, { transport: h, role: 'host', oppCharKey: 'mimi' })
     const client = new BattleView({ charKey: 'mimi', botLevel: 6, practice: false, mapKey: 'skyhaven' }, noop, { transport: c, role: 'client', oppCharKey: 'renji' })
-    // ホスト青将を動かし(puppet追従)＋HPを削る(HPバー同期の確認)
+    // ホスト青将を動かし(puppet追従)＋自機(赤)HPを削る(HPバー/被弾演出の確認)。青将HPはループ中に削る(下記)。
     host.player.pos.set(5, 0, 10); host.player.group.position.copy(host.player.pos)
-    host.player.hp = 60
+    host.bot.hp = 70 // client視点では自機(赤)被弾→onDamaged/dmgTaken
     let snapsSeen = 0
     const origIngest = (client as any).puppets.ingest.bind((client as any).puppets)
     ;(client as any).puppets.ingest = (s: any) => { snapsSeen++; origIngest(s) }
@@ -1274,6 +1283,7 @@ window.addEventListener('resize', () => {
     let peakClientBolts = 0
     for (let f = 0; f < 40; f++) {
       if (f % 4 === 0) hc.fireBolt(new THREE.Vector3(2, 1.5, 9), new THREE.Vector3(0.1, 0.2, 1), { damage: 10, team: 'blue', from: host.player, speed: 130, size: 0.09 })
+      if (f % 6 === 0 && host.player.hp > 25) host.player.hp -= 8 // 青将を徐々に削る→client視点で相手被弾→ヒットマーカー/dmgDealt
       host.update(1 / 60); client.update(1 / 60)
       peakClientBolts = Math.max(peakClientBolts, cc.boltCount)
     }
@@ -1307,7 +1317,8 @@ window.addEventListener('resize', () => {
       peakClientBolts, // 同時に飛んでいたクライアント視覚弾のピーク
       deploySpawnedToken, // クライアント配備要求→ホストがトークンspawn(true期待)
       skillActivated, // クライアントのスキル発動→ホストが権威適用(true期待)
-      ok: snapsSeen > 0 && puppetCount > 0 && clientVisualBolts > 0 && deploySpawnedToken && skillActivated,
+      clientCombatFeedback: { dealt: Math.round(client.stats.dmgDealt), taken: Math.round(client.stats.dmgTaken) }, // 相手被弾→dealt, 自機被弾→taken(両>0期待)
+      ok: snapsSeen > 0 && puppetCount > 0 && clientVisualBolts > 0 && deploySpawnedToken && skillActivated && client.stats.dmgDealt > 0 && client.stats.dmgTaken > 0,
     } as any
     // 切断ハンドリング検証: クライアント切断→両者のマッチがover(フリーズしない)
     c.close()
