@@ -20,6 +20,14 @@ function lerpAngle(a: number, b: number, t: number) {
   return a + d * Math.min(1, t)
 }
 
+/** 角度を [-π, π] に正規化 */
+function wrapAngle(x: number) {
+  let d = x % (Math.PI * 2)
+  if (d > Math.PI) d -= Math.PI * 2
+  if (d < -Math.PI) d += Math.PI * 2
+  return d
+}
+
 function lerp(a: number, b: number, t: number) {
   return a + (b - a) * t
 }
@@ -116,6 +124,8 @@ export class BotCommander implements Unit {
   private prevTargetPos = new THREE.Vector3()
   private targetVel = new THREE.Vector3()
   private aimErr = 0
+  private aimYaw = 0 // 上体エイムの残差ヨー(胴体facing後の頭/胸の向き調整)
+  private aimPitch = 0 // 上体エイムのピッチ(狙いの上下。+で標的が上)
 
   private flashPairs: { m: THREE.MeshStandardMaterial; color: number; intensity: number }[] = []
   private flashT = 0
@@ -362,6 +372,10 @@ export class BotCommander implements Unit {
     const t = this.target
     if (!t || !t.alive || t.stealthed || this.charging) {
       this.burstLeft = 0
+      // エイムレイヤーを中立へ戻す(狙いが無ければ頭/胸を正面へ)
+      const dk = Math.min(1, dt * 6)
+      this.aimYaw += (0 - this.aimYaw) * dk
+      this.aimPitch += (0 - this.aimPitch) * dk
       this.captureFire(dt) // 敵が居なければスフィア占領を進める
       return
     }
@@ -369,6 +383,20 @@ export class BotCommander implements Unit {
     const dz = t.group.position.z - this.group.position.z
     // モデル前面は-Zなので+πで「顔(視線)」をターゲット=実際のエイム方向へ向ける(見かけの視線と一致)
     this.group.rotation.y = lerpAngle(this.group.rotation.y, Math.atan2(dx, dz) + Math.PI, dt * 9)
+    // 上体エイムレイヤー: eye→target の方向(shoot()のbaseDirと同源)を頭/胸のピッチ+残差ヨーへ伝える。
+    // これで段差・浮遊ドローン相手でも「見かけの視線=実際の弾道」になり、どこを狙っているか読める。
+    const eye = this.eye()
+    const at = t.group.position.clone()
+    at.y += t.height * 0.55
+    const adx = at.x - eye.x
+    const ady = at.y - eye.y
+    const adz = at.z - eye.z
+    const horiz = Math.max(0.001, Math.hypot(adx, adz))
+    const wantYaw = wrapAngle(Math.atan2(adx, adz) + Math.PI - this.group.rotation.y)
+    const wantPitch = Math.atan2(ady, horiz)
+    const ak = Math.min(1, dt * 10)
+    this.aimYaw += wrapAngle(wantYaw - this.aimYaw) * ak
+    this.aimPitch += (wantPitch - this.aimPitch) * ak
 
     const w = this.char.weapon
     this.fireT -= dt
@@ -544,7 +572,7 @@ export class BotCommander implements Unit {
       })
       return
     }
-    if (this.group.userData.bones) animateSkeleton(this.group, this.animT, this.animAmp)
+    if (this.group.userData.bones) animateSkeleton(this.group, this.animT, this.animAmp, this.aimYaw, this.aimPitch)
     else animateGlbBody(this.group, this.animT, this.animAmp)
   }
 

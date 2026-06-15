@@ -141,36 +141,66 @@ export function animateGlbBody(group: THREE.Group, animT: number, animAmp: numbe
  * animAmp(0..1)=移動強度。歩行サイクル(脚前後振り・膝曲げ・腕逆相)＋常時アイドル(呼吸・首ゆれ)。
  * クリップ無しでもコードで生き生きと動かす方式。
  */
-export function animateSkeleton(group: THREE.Group, animT: number, animAmp: number) {
+const SKEL_BONES = [
+  'L_Thigh', 'R_Thigh', 'L_Calf', 'R_Calf', 'L_Upperarm', 'R_Upperarm',
+  'L_Forearm', 'R_Forearm', 'Spine01', 'Spine02', 'Waist', 'Head', 'NeckTwist01',
+]
+/**
+ * リグ済みGLBの関節アニメ。歩行/アイドルに加え、エイムレイヤー(上体ピッチ+微ヨー)を additive 合成する。
+ * aimYaw/aimPitch を渡すと、頭・胴を「実際の狙い方向」へ向ける(FPSの視線可読性: 敵がどこを狙っているか読める)。
+ * 全レイヤーを rest からの加算で合成するため、各ボーンを毎フレーム rest へ戻してから足し込む(set上書きではなく累積)。
+ * aim引数省略時は従来どおり歩行/アイドルのみ(トークン/デコイ/ショーケースは後方互換)。
+ */
+export function animateSkeleton(
+  group: THREE.Group, animT: number, animAmp: number, aimYaw = 0, aimPitch = 0,
+) {
   const bones = group.userData.bones as Record<string, THREE.Bone> | undefined
   if (!bones) return
+  // 1) 駆動ボーンを rest 姿勢へリセット(以降は加算でレイヤー合成)
+  for (const n of SKEL_BONES) {
+    const b = bones[n]
+    const rest = b?.userData.rest as THREE.Euler | undefined
+    if (b && rest) b.rotation.copy(rest)
+  }
+  const add = (name: string, axis: 'x' | 'y' | 'z', delta: number) => {
+    const b = bones[name]
+    if (b) b.rotation[axis] += delta
+  }
   const amp = animAmp
   const sw = Math.sin(animT) // 歩行位相
   const sw2 = Math.sin(animT * 0.5) // ゆったり位相(アイドル)
   const breathe = Math.sin(animT * 0.9)
-  const set = (name: string, axis: 'x' | 'y' | 'z', delta: number) => {
-    const b = bones[name]
-    if (!b) return
-    const rest = b.userData.rest as THREE.Euler
-    b.rotation[axis] = rest[axis] + delta
-  }
   // 歩行: 脚を前後に振る(左右逆相)＋後ろ脚で膝を曲げる
-  set('L_Thigh', 'x', sw * 0.55 * amp)
-  set('R_Thigh', 'x', -sw * 0.55 * amp)
-  set('L_Calf', 'x', Math.max(0, -sw) * 0.7 * amp)
-  set('R_Calf', 'x', Math.max(0, sw) * 0.7 * amp)
+  add('L_Thigh', 'x', sw * 0.55 * amp)
+  add('R_Thigh', 'x', -sw * 0.55 * amp)
+  add('L_Calf', 'x', Math.max(0, -sw) * 0.7 * amp)
+  add('R_Calf', 'x', Math.max(0, sw) * 0.7 * amp)
   // 腕は脚と逆相に振る(肘も軽く曲げる)
-  set('L_Upperarm', 'x', -sw * 0.4 * amp)
-  set('R_Upperarm', 'x', sw * 0.4 * amp)
-  set('L_Forearm', 'x', (0.25 + Math.max(0, sw) * 0.25) * amp)
-  set('R_Forearm', 'x', (0.25 + Math.max(0, -sw) * 0.25) * amp)
-  // 体幹: 前傾少々＋呼吸＋腰のひねり
-  set('Spine01', 'x', -0.07 * amp + breathe * 0.018)
-  set('Spine02', 'x', breathe * 0.02)
-  set('Waist', 'y', sw * 0.07 * amp)
-  // 首/頭のゆれ(常時の生命感)
-  set('Head', 'z', sw2 * 0.05)
-  set('NeckTwist01', 'x', breathe * 0.015)
+  add('L_Upperarm', 'x', -sw * 0.4 * amp)
+  add('R_Upperarm', 'x', sw * 0.4 * amp)
+  add('L_Forearm', 'x', (0.25 + Math.max(0, sw) * 0.25) * amp)
+  add('R_Forearm', 'x', (0.25 + Math.max(0, -sw) * 0.25) * amp)
+  // 体幹: 前傾少々(=−x)＋呼吸＋腰のひねり
+  add('Spine01', 'x', -0.07 * amp + breathe * 0.018)
+  add('Spine02', 'x', breathe * 0.02)
+  add('Waist', 'y', sw * 0.07 * amp)
+  // 首/頭の常時sway。エイム中は抑制して視線を狙いへ優先させる
+  const aimMag = Math.min(1, (Math.abs(aimYaw) + Math.abs(aimPitch)) * 1.5)
+  const swayK = 1 - aimMag
+  add('Head', 'z', sw2 * 0.05 * swayK)
+  add('NeckTwist01', 'x', breathe * 0.015 * swayK)
+  // === エイムレイヤー: ヨーは胴体facingの残差を上体で吸収、ピッチは胸+頭で狙いの上下を見せる ===
+  // 符号基準: 歩行の「前傾」は Spine01.x = −0.07(=−x が前傾/下向き)。よって +x が上向き。
+  // aimPitch>0(標的が上)→ +x で頭/胸が上を向く。首折れ防止に各ボーンを分配+クランプ。
+  const cy = THREE.MathUtils.clamp(aimYaw, -1.2, 1.2)
+  const cp = THREE.MathUtils.clamp(aimPitch, -0.8, 0.8)
+  add('Waist', 'y', cy * 0.25)
+  add('Spine01', 'y', cy * 0.25)
+  add('Spine02', 'y', cy * 0.2)
+  add('NeckTwist01', 'y', cy * 0.15)
+  add('Head', 'y', cy * 0.15)
+  add('Spine02', 'x', cp * 0.3)
+  add('Head', 'x', cp * 0.7)
 }
 
 /**
