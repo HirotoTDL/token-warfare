@@ -7,7 +7,7 @@ export class Sfx {
 
   setVolume(mul: number) {
     this.volMul = mul
-    if (this.master) this.master.gain.value = 0.5 * mul
+    if (this.master) this.master.gain.value = 0.62 * mul
   }
 
   unlock() {
@@ -15,8 +15,18 @@ export class Sfx {
       try {
         this.ctx = new AudioContext()
         this.master = this.ctx.createGain()
-        this.master.gain.value = 0.5 * this.volMul
-        this.master.connect(this.ctx.destination)
+        // 0.5→0.62。後段のリミッターでピークを抑えるので、ベース音量を上げても歪まない=知覚的に強くなる。
+        this.master.gain.value = 0.62 * this.volMul
+        // マスターのグルー・リミッター: 多数のSEが重なってもクリップさせず、知覚音量を底上げして
+        // 「強く・締まった」鳴りにする(撃ち合いで銃声が団子になっても迫力が崩れない)。
+        const comp = this.ctx.createDynamicsCompressor()
+        comp.threshold.value = -12
+        comp.knee.value = 8
+        comp.ratio.value = 10
+        comp.attack.value = 0.002
+        comp.release.value = 0.14
+        this.master.connect(comp)
+        comp.connect(this.ctx.destination)
         const len = this.ctx.sampleRate * 1
         this.noiseBuf = this.ctx.createBuffer(1, len, this.ctx.sampleRate)
         const d = this.noiseBuf.getChannelData(0)
@@ -60,18 +70,24 @@ export class Sfx {
   }
 
   shot(heavy = false) {
+    // 爽快感のある銃声の定石=多層構成: ①鋭いクラック(立ち上がり) ②太い本体 ③下降スナップ(芯) ④サブ低域(重み)
     if (heavy) {
-      this.noise(0.25, 0.5, 700, 0.7)
-      this.tone(160, 40, 0.22, 0.35, 'triangle')
+      this.noise(0.025, 0.6, 2800, 0.5, 'highpass') // クラック(空気を切る鋭さ)
+      this.noise(0.28, 0.8, 600, 0.7) // 本体(ビーム放出の太い芯)
+      this.tone(440, 70, 0.18, 0.5, 'sawtooth') // 下降スナップ「ドゥンッ」
+      this.tone(155, 46, 0.26, 0.5, 'sine') // サブ(胸に来る重み)
     } else {
-      this.noise(0.09, 0.35, 1600, 0.8)
-      this.tone(240, 90, 0.07, 0.18, 'square')
+      this.noise(0.016, 0.55, 3600, 0.5, 'highpass') // 鋭いクラック
+      this.noise(0.1, 0.62, 1450, 0.8) // 本体テクスチャ
+      this.tone(950, 200, 0.06, 0.42, 'square') // 「ピシュッ」と下がるスナップ
+      this.tone(185, 60, 0.1, 0.4, 'sine') // サブの芯(従来薄かった軽射に重みを付与)
     }
   }
 
   /** 遠くの銃声(敵・トークン) */
   shotFar(vol = 0.12) {
     this.noise(0.08, vol, 900, 1)
+    this.tone(320, 120, 0.07, vol * 0.55, 'square') // 遠くの「パンッ」の芯を薄く重ねて存在感を出す
   }
 
   hitmarker() {
