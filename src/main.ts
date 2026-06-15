@@ -687,11 +687,17 @@ class BattleView implements View {
   update(dt: number) {
     const paused = this.everLocked && !input.locked && !this.over && this.player.alive
     resumeOverlay.classList.toggle('hidden', !paused)
+    if (paused) {
+      // オンライン対戦は一時停止できない(ホストが止まると対戦全体が凍結/クライアントは無操作の的になり復帰時に飛ぶ)。
+      // overlayは出して操作復帰を促すが、ゲーム自体は進め続ける。文言も状況に合わせる。
+      const span = resumeOverlay.querySelector('span')
+      if (span) span.textContent = this.net ? 'クリックで操作再開（対戦は進行中！）' : 'クリックで戦闘に戻る'
+    }
     this.t += dt
     this.world.time = this.t
     this.sky.update(this.t)
     this.arena.update(dt, this.t)
-    if (paused) return
+    if (paused && !this.net) return // 一時停止で凍結するのはオフラインのみ。オンラインはsim/ネットコードを進め続ける。
 
     // クライアントは権威simを持たない: 入力送信＋受信スナップショット適用(スコア/タイマー/相手puppet/自機補正)
     if (this.isClient) this.clientNetUpdate(dt)
@@ -1513,6 +1519,42 @@ window.addEventListener('resize', () => {
       predictionTight: !nanSeen && maxDrift < 1.5 && snapWouldFire === 0,
     }
     r.ok = r.predictionTight
+    host.dispose(); client.dispose()
+    return r
+  },
+  // PvP一時停止の凍結回避検証: オンラインではポインタ解除("一時停止")でも update が早期returnせず、
+  // snapshot適用/入力送信を続ける(=対戦が凍結しない)ことを確認。オフラインは従来どおり凍結する。
+  netNoPauseFreeze() {
+    const [h, c] = LoopbackTransport.pair(0, true)
+    const noop = () => {}
+    const host = new BattleView({ charKey: 'renji', botLevel: 6, practice: false, mapKey: 'skyhaven' }, noop, { transport: h, role: 'host', oppCharKey: 'mimi' })
+    const client = new BattleView({ charKey: 'mimi', botLevel: 6, practice: false, mapKey: 'skyhaven' }, noop, { transport: c, role: 'client', oppCharKey: 'renji' })
+    const pm = (client as any).puppets
+    let ing = 0
+    const origIng = pm.ingest.bind(pm)
+    pm.ingest = (s: any) => { ing++; origIng(s) }
+    const savedLocked = input.locked
+    const dtMs = 1000 / 60
+    let ingestedWhilePaused = 0, hostAdvanced = false
+    try {
+      // ウォームアップ(通常状態=ロック中: paused にならない)で接続+puppet生成
+      input.locked = true; client.everLocked = true
+      for (let f = 0; f < 30; f++) { host.update(1 / 60); client.update(1 / 60); h.advance(dtMs); c.advance(dtMs) }
+      // 「一時停止」を模擬: ポインタ解除(locked=false)。client は everLocked && !locked で paused 状態になる。
+      input.locked = false
+      const ingBefore = ing
+      const hostTimerStart = host.timer
+      for (let f = 0; f < 60; f++) { host.update(1 / 60); client.update(1 / 60); h.advance(dtMs); c.advance(dtMs) }
+      ingestedWhilePaused = ing - ingBefore // 一時停止中もsnapshotを取り込み続けたか(オンライン=凍結しない→>0期待)
+      hostAdvanced = hostTimerStart - host.timer > 0.5 // ホスト権威simが進んだ(タイマー減少)
+    } finally {
+      input.locked = savedLocked
+    }
+    const r: any = {
+      ingestedWhilePaused,
+      hostAdvanced,
+      ok: ingestedWhilePaused > 0 && hostAdvanced, // 一時停止中も同期が流れ、対戦が進行している
+    }
     host.dispose(); client.dispose()
     return r
   },
