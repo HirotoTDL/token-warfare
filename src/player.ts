@@ -322,7 +322,7 @@ export class PlayerCommander implements Unit {
       if (this.burstT <= 0) {
         this.burstT = w.burstInterval ?? 0.07
         this.burstLeft--
-        this.emitShot(moving, zoomed)
+        this.emitShot(moving, zoomed, sprinting)
       }
     }
     const trigger = w.auto ? input.mouseDown : input.mousePressed
@@ -335,7 +335,7 @@ export class PlayerCommander implements Unit {
           this.burstLeft = w.burst
           this.burstT = 0
         } else {
-          this.emitShot(moving, zoomed)
+          this.emitShot(moving, zoomed, sprinting)
         }
       } else if (!this.energyWarned) {
         this.energyWarned = true
@@ -359,7 +359,7 @@ export class PlayerCommander implements Unit {
   }
 
   /** 1発(ペレット束)を発射 */
-  private emitShot(moving: boolean, zoomed: boolean) {
+  private emitShot(moving: boolean, zoomed: boolean, sprinting = false) {
     const w = this.weapon
     if (this.stealthed) {
       this.stealthed = false
@@ -368,7 +368,9 @@ export class PlayerCommander implements Unit {
     }
     const dir = this.camera.getWorldDirection(new THREE.Vector3())
     let spread = w.spread * (zoomed ? 0.45 : 1)
-    if (moving) spread *= 1.5
+    // 速度⇄精度のスキル選択: 立ち撃ち=最精密、歩き撃ち=やや散る、スプリント撃ち=大きく散る、空中=最も散る。
+    // 止まって/しゃがんで(ADS)正確に当てる判断と、機動で被弾を避ける判断のトレードオフを作る。
+    if (moving) spread *= sprinting ? 2.2 : 1.4
     if (!this.onGround) spread *= 2.0
     const muzzlePos = this.muzzle.getWorldPosition(new THREE.Vector3())
     this.shotsFired++
