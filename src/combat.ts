@@ -160,6 +160,8 @@ export interface BoltOpts {
   gravity?: number
   maxRange?: number
   size?: number
+  /** オンラインclient用の見た目専用弾: ユニット命中もスフィア占領も起こさない(ダメージはホスト権威) */
+  visual?: boolean
 }
 
 interface Bolt {
@@ -183,6 +185,9 @@ export class Combat {
   private tmpDir = new THREE.Vector3()
   private tmpV = new THREE.Vector3()
   private tmpHit = new THREE.Vector3() // ユニットヒット点の使い回し
+
+  /** オンラインhost: 弾発射ごとに呼ばれる(発射イベントをクライアントへ中継して相手にも弾が見えるようにする) */
+  onFire: ((origin: THREE.Vector3, dir: THREE.Vector3, opts: BoltOpts) => void) | null = null
 
   /** 計測用(__tw.perf): アクティブ弾数 / プール退避数。プールが青天井に伸びていなければリーク無し */
   get boltCount() { return this.bolts.length }
@@ -231,6 +236,8 @@ export class Combat {
     b.opts = opts
     b.alive = true
     this.bolts.push(b)
+    // オンラインhost: 発射をクライアントへ中継(相手画面でも弾が見える)。視覚弾(client再生分)は中継しない。
+    if (this.onFire && !opts.visual) this.onFire(origin, d, opts)
   }
 
   /** 拡散角を加えた方向ベクトルを作るユーティリティ */
@@ -261,12 +268,14 @@ export class Combat {
       // 割り当て無し・桁違いに軽い。step区間で最も近いユニットを選ぶ。
       let hitUnit: Unit | null = null
       let unitDist = Infinity
-      for (const u of this.world.units) {
-        if (!u.alive || u.team === b.opts.team || u === b.opts.from) continue
-        const up = u.group.position
-        const r = u.radius
-        const t = rayAabb(b.pos.x, b.pos.y, b.pos.z, dir.x, dir.y, dir.z, up.x - r, up.y, up.z - r, up.x + r, up.y + u.height, up.z + r, step)
-        if (t >= 0 && t < unitDist) { unitDist = t; hitUnit = u }
+      if (!b.opts.visual) { // 視覚弾(client再生)はダメージ判定しない(ホスト権威)
+        for (const u of this.world.units) {
+          if (!u.alive || u.team === b.opts.team || u === b.opts.from) continue
+          const up = u.group.position
+          const r = u.radius
+          const t = rayAabb(b.pos.x, b.pos.y, b.pos.z, dir.x, dir.y, dir.z, up.x - r, up.y, up.z - r, up.x + r, up.y + u.height, up.z + r, step)
+          if (t >= 0 && t < unitDist) { unitDist = t; hitUnit = u }
+        }
       }
 
       if (hitUnit && unitDist < obsDist && unitDist <= step) {
@@ -296,8 +305,8 @@ export class Combat {
         continue
       }
 
-      // スフィア占領: 弾がスフィアに入ったら占領ダメージを与えて消滅(爆発弾は爆発で処理)
-      const sphere = this.world.objectives?.sphereNear(b.pos, 0.4)
+      // スフィア占領: 弾がスフィアに入ったら占領ダメージを与えて消滅(爆発弾は爆発で処理)。視覚弾は占領しない。
+      const sphere = b.opts.visual ? null : this.world.objectives?.sphereNear(b.pos, 0.4)
       if (sphere) {
         const dmg = b.opts.damage * (b.opts.falloff ? falloffMul(b.opts.falloff, b.traveled) : 1)
         if (b.opts.explosive) {

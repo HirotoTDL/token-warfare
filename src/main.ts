@@ -424,13 +424,29 @@ class BattleView implements View {
       rc.attach(net.transport) // 'input'チャンネルで相手の操作を受信
       this.bot = rc
       this.world.addUnit(this.bot)
+      // 自軍(青=ホスト側)の発射をクライアントへ中継→相手画面に弾が見える(赤=client自機分は予測描画なので除外)
+      this.combat.onFire = (o, d, opts) => {
+        if (opts.team !== 'blue') return
+        net.transport.send('event', { type: 'fire', ox: +o.x.toFixed(2), oy: +o.y.toFixed(2), oz: +o.z.toFixed(2), dx: +d.x.toFixed(3), dy: +d.y.toFixed(3), dz: +d.z.toFixed(3), col: opts.color, sp: opts.speed, sz: opts.size, ex: opts.explosive?.radius, gr: opts.gravity })
+      }
     } else if (this.isClient) {
       // クライアント: 権威simを持たない。自機は赤陣営(host=青)。相手将/トークンはスナップショットでpuppet描画。
       this.player.team = 'red'
       this.player.respawn(this.world.basePos.red, 0) // 赤陣スポーンへ
       this.puppets = new PuppetManager(this.world.scene)
       this.puppets.setLocalCommanderTeam('red')
-      net!.transport.onMessage((ch, data) => { if (ch === 'state') this.lastSnap = data as Snapshot })
+      net!.transport.onMessage((ch, data: any) => {
+        if (ch === 'state') this.lastSnap = data as Snapshot
+        else if (ch === 'event' && data && data.type === 'fire') {
+          // ホストから来た青(相手)の発射を視覚弾として再生(ダメージはホスト権威=snapshotのHPで反映)
+          this.combat.fireBolt(
+            new THREE.Vector3(data.ox, data.oy, data.oz),
+            new THREE.Vector3(data.dx, data.dy, data.dz),
+            { damage: 0, team: 'blue', from: null, speed: data.sp ?? 130, color: data.col, size: data.sz, explosive: data.ex ? { radius: data.ex } : undefined, gravity: data.gr, visual: true },
+          )
+          sfx.shotFar(0.1)
+        }
+      })
     } else {
       // オフライン(従来どおり): CPU将
       this.bot = new BotCommander(this.world, this.combat, sfx, botChar, this.world.basePos.red, botParams(config.botLevel))
@@ -1234,7 +1250,19 @@ window.addEventListener('resize', () => {
     let snapsSeen = 0
     const origIngest = (client as any).puppets.ingest.bind((client as any).puppets)
     ;(client as any).puppets.ingest = (s: any) => { snapsSeen++; origIngest(s) }
-    for (let f = 0; f < 40; f++) { host.update(1 / 60); client.update(1 / 60) }
+    // ホスト青将が発射→onFireで中継→クライアントが視覚弾を再生するか
+    const hc = (host as any).combat
+    const cc = (client as any).combat
+    let fireEvents = 0
+    const origFB = cc.fireBolt.bind(cc)
+    cc.fireBolt = (o: any, d: any, opts: any) => { if (opts && opts.visual) fireEvents++; return origFB(o, d, opts) }
+    let peakClientBolts = 0
+    for (let f = 0; f < 40; f++) {
+      if (f % 4 === 0) hc.fireBolt(new THREE.Vector3(2, 1.5, 9), new THREE.Vector3(0.1, 0.2, 1), { damage: 10, team: 'blue', from: host.player, speed: 130, size: 0.09 })
+      host.update(1 / 60); client.update(1 / 60)
+      peakClientBolts = Math.max(peakClientBolts, cc.boltCount)
+    }
+    const clientVisualBolts = fireEvents // クライアントが視覚弾として再生した発射数
     // クライアントのpuppet群(ホストの青将renji等)の位置を取得
     const pm = (client as any).puppets
     const puppetCount = (pm as any).puppets.size
@@ -1249,7 +1277,9 @@ window.addEventListener('resize', () => {
       clientScores: client.scores,
       hostScores: host.scores,
       clientPlayerTeam: client.player.team,
-      ok: snapsSeen > 0 && puppetCount > 0,
+      clientVisualBolts, // ホスト発射が視覚弾としてクライアントに再生された数(>0期待)
+      peakClientBolts, // 同時に飛んでいたクライアント視覚弾のピーク
+      ok: snapsSeen > 0 && puppetCount > 0 && clientVisualBolts > 0,
     }
     host.dispose(); client.dispose()
     return r
