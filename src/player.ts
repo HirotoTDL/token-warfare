@@ -109,7 +109,8 @@ export class PlayerCommander implements Unit {
   private dashDir = new THREE.Vector3()
   private armorT = 0
   private bobT = 0
-  private vmKick = 0
+  private vmKick = 0 // ビューモデルの後方(+Z)押し戻し量
+  private vmRotX = 0 // ビューモデルの銃口跳ね上がり(発砲反動。+Xで銃口が上=muzzle climb)
   private deployRay = new THREE.Raycaster()
   private energyWarned = false
   private shakeT = 0
@@ -301,14 +302,17 @@ export class PlayerCommander implements Unit {
       this.camera.fov += (targetFov - this.camera.fov) * Math.min(1, dt * 14)
       this.camera.updateProjectionMatrix()
     }
-    this.vmKick = Math.max(0, this.vmKick - dt * 0.6)
+    // 反動は指数減衰で素早く戻す(線形だと戻りが間延びして「ふわっ」と感じる。カメラリコイルの減衰感と揃える)
+    this.vmKick *= Math.exp(-dt * 12)
+    this.vmRotX *= Math.exp(-dt * 10)
     this.muzzleLight.intensity *= Math.exp(-dt * 16)
     this.viewmodel.position.set(
       zoomed ? 0.09 : 0.22,
       (zoomed ? -0.15 : -0.2) + Math.sin(this.bobT * 0.5) * 0.006,
       (this.charging ? -0.36 : -0.48) + this.vmKick,
     )
-    this.viewmodel.rotation.x = this.charging ? 0.5 : 0
+    // チャージの構え(0.5)に、発砲ごとの銃口跳ね上がり(vmRotX)を加算合成
+    this.viewmodel.rotation.x = (this.charging ? 0.5 : 0) + this.vmRotX
     this.camera.updateMatrixWorld()
 
     // --- 射撃 ---
@@ -395,7 +399,10 @@ export class PlayerCommander implements Unit {
     // リコイル(視覚キック。自動で戻るのでエイムは安定)
     this.recoilP = Math.min(0.12, this.recoilP + w.recoil * (0.7 + Math.random() * 0.5))
     this.recoilY += (Math.random() - 0.5) * w.recoil * 0.6
-    this.vmKick = Math.min(0.08, this.vmKick + (w.energyCost > 10 ? 0.06 : 0.022))
+    const heavy = w.energyCost > 10
+    this.vmKick = Math.min(0.08, this.vmKick + (heavy ? 0.06 : 0.022))
+    // 銃口跳ね上がり: 重い弾ほど大きく跳ねる。位置キックと合わせて「撃った手応え」を出す
+    this.vmRotX = Math.min(0.16, this.vmRotX + (heavy ? 0.1 : 0.045))
   }
 
   /** 着弾コールバック(combatから) */
