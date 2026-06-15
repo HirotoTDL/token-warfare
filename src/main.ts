@@ -23,6 +23,9 @@ import { simulateMatch, simulateMatrix, summarize } from './sim'
 import { Objectives, CAPTURE_TO_WIN } from './objectives'
 import { DamagePopups } from './dmgpop'
 import { PostFX } from './postfx'
+import { LoopbackTransport } from './net/transport'
+import { RemoteCommander } from './net/remoteCommander'
+import type { NetInput } from './net/netInput'
 import { RoomEnvironment } from 'three/examples/jsm/environments/RoomEnvironment.js'
 
 // --- 基盤 ---
@@ -944,6 +947,35 @@ window.addEventListener('resize', () => {
       frameMs: { p50: round(at(0.5)), p95: round(at(0.95)), max: round(s[s.length - 1] || 0), n: s.length },
       fps: round(1000 / Math.max(0.001, at(0.5))),
       ...(battle ? battle.debugPerf() : {}),
+    }
+  },
+  // オンライン対戦Phase0検証: LoopbackTransportでNetInputを送り、RemoteCommanderが
+  // 受信入力で前進/発砲するか(=ネットコードの土台が機能するか)をローカルで確認する。
+  netSelfTest() {
+    if (!battle) return { err: 'バトル未開始(先に startBattle)' }
+    const b = battle
+    const combat = (b as any).combat as Combat
+    const remote = new RemoteCommander(b.world, combat, sfx, CHARACTERS[0], 'red', new THREE.Vector3(0, 0, 6))
+    b.world.addUnit(remote)
+    const [host, client] = LoopbackTransport.pair(0)
+    remote.attach(host)
+    let seq = 0
+    const send = (ni: Partial<NetInput>) =>
+      client.send('input', { seq: ++seq, mx: 0, mz: 0, yaw: 0, pitch: 0, fire: false, charge: false, jump: false, zoom: false, ...ni })
+    const startPos = remote.pos.clone()
+    let maxBolts = 0
+    for (let f = 0; f < 30; f++) { send({ mz: 1, fire: true }); remote.update(1 / 60); maxBolts = Math.max(maxBolts, combat.boltCount) }
+    const movedDist = remote.pos.distanceTo(startPos)
+    const afterMove = remote.pos.clone()
+    for (let f = 0; f < 60; f++) { send({ mz: 0, fire: false }); remote.update(1 / 60) }
+    const idleDrift = remote.pos.distanceTo(afterMove)
+    remote.alive = false
+    b.world.removeUnit(remote)
+    return {
+      moved_forward_m: +movedDist.toFixed(2), // 受信入力で前進したか(>0期待)
+      fired_bolts: maxBolts, // 受信fireで発射したか(>0期待)
+      idle_drift_m: +idleDrift.toFixed(2), // 入力停止で慣性減衰し停止したか(小さい値期待)
+      ok: movedDist > 1 && maxBolts > 0,
     }
   },
 }
