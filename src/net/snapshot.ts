@@ -134,6 +134,7 @@ export class PuppetManager {
     const present = new Set<number>()
     for (const u of units) {
       if (!u || typeof u !== 'object') continue // 非信頼peer由来: null/非オブジェクト要素は捨てる(isLocal/有限性検証の前にshapeを担保)
+      if (u.team !== 'blue' && u.team !== 'red') continue // teamは{blue,red}のみ許可(不正値でTEAM_COLOR等が壊れるのを防ぐ)
       if (this.isLocal(u)) continue
       // 非信頼peer(host)由来の座標を検証: NaN/Infをpuppet行列に入れるとThREEのフラスタムカリングが壊れ画面が凍結する。
       // client→host(input/fire)と同じ「不正フレームは捨てる」方針をstateにも適用(非有限ユニットはスキップ=残留もさせない)。
@@ -142,9 +143,16 @@ export class PuppetManager {
       present.add(u.id)
       let p = this.puppets.get(u.id)
       if (!p) {
-        const built = this.buildModelFor(u)
-        const stealthMats = this.collectMats(built.group) // バー追加前にモデル素材だけ収集
-        const bar = this.buildHpBar(u.kind)
+        // モデル構築を try/catch で包む: 非信頼peer由来の不正 kind/ck 等でモデル生成が throw しても、そのunitだけ
+        // 捨ててフレーム全体(score/勝敗/自機reconcile)を巻き添えにしない(=毎フレームthrowによるclientフリーズを防ぐ)。
+        let built: { group: THREE.Group; placeholder: boolean }
+        let stealthMats: { m: THREE.Material; baseOpacity: number }[]
+        let bar: { group: THREE.Group; fill: THREE.Sprite; fillMat: THREE.SpriteMaterial }
+        try {
+          built = this.buildModelFor(u)
+          stealthMats = this.collectMats(built.group) // バー追加前にモデル素材だけ収集
+          bar = this.buildHpBar(u.kind)
+        } catch { present.delete(u.id); continue }
         built.group.add(bar.group)
         this.group.add(built.group)
         p = {

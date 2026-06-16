@@ -331,7 +331,9 @@ export class RemoteCommander implements Unit {
     wish.addScaledVector(right, mx)
     const moving = wish.lengthSq() > 0
     if (moving) wish.normalize()
-    const sprinting = mz > 0 && Math.abs(mx) < 0.01 && !zoomed && !this.charging
+    // sprintは受信フラグで判定(旧: 移動から幾何推定していたが、Shift未押下の純前進でhost=走8.5/client=歩6となり
+    // 前進時に定常2.5m/s乖離→自機が周期x/zスナップ＋走り撃ちspread不公平を生んでいた)。player.ts:248 と同条件に揃える。
+    const sprinting = !!ni && !stale && !!ni.sprint && mz > 0 && !zoomed && !this.charging
     let speed = sprinting ? 8.5 : 6
     if (zoomed) speed *= 0.55
     if (this.charging) speed *= CHARGE_SPEED_MUL

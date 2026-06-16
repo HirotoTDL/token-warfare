@@ -14,6 +14,7 @@ export interface NetInput {
   charge: boolean // エネルギーチャージ(Rホールド)
   jump: boolean // ジャンプ(押下中)
   zoom: boolean // ズーム(右クリック)
+  sprint?: boolean // スプリント(Shift+前進)。これが無いとhostが移動から走り/歩きを幾何推定し、前進時にclient予測と定常乖離→自機が周期スナップ
   /** 立ち上がり単発トリガ(このフレームだけ): 'skill' | 'dash' | `deploy:<token>` 等。Phase1で拡充 */
   triggers?: string[]
 }
@@ -39,6 +40,7 @@ export function sampleNetInput(input: Input, yaw: number, pitch: number, seq: nu
     charge: input.down('charge'),
     jump: input.down('jump'),
     zoom: input.mouseRight,
+    sprint: input.down('sprint') || undefined, // falseは送らず帯域節約。host側でplayer.tsと同一のsprint判定に使う
     triggers: triggers.length ? triggers : undefined,
   }
 }

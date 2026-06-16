@@ -553,12 +553,14 @@ export class PlayerCommander implements Unit {
     this.skillCd = s.cooldown
     this.skillActiveT = s.duration
     this.sfx.skill()
+    // dash の移動成分(dashT/dashDir)だけは onSkill 抑止の前にローカル適用する。dashはステルス/HP等の権威状態に
+    // 影響しない純移動なので、clientでローカル予測してもhost権威と一致する。これが無いとhostの24m/sダッシュ毎に
+    // client自機が drift>3m でハードスナップ(瞬間移動)していた。skillCd/skillActiveT は上で進めるので二重発火しない。
+    if (s.key === 'dash') { this.dashT = 0.16; this.dashDir.copy(dir).setY(0).normalize() }
     // オンラインclient: 効果はホスト権威で適用(結果はsnapshot反映)。ローカルはcd/演出のみ(HUD維持)で実効果は抑止。
     if (this.onSkill && this.onSkill()) return
     switch (s.key) {
       case 'dash':
-        this.dashT = 0.16
-        this.dashDir.copy(dir).setY(0).normalize()
         this.onMessage?.('ブリッツダッシュ!')
         break
       case 'dome':

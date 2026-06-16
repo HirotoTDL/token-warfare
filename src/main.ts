@@ -1715,6 +1715,12 @@ window.addEventListener('resize', () => {
       { score: [1, 2], spheres: [0, 0, 0], timer: 100, units: [null], cores: [null], reveal: [NaN, 0], t: 1 },
       { score: [1, 2], spheres: [0, 0, 0], timer: 100, units: [42, null, { kind: 'commander', team: 'blue' }], cores: [{ x: NaN, z: 0, s: 0 }], reveal: 'oops', t: 2 },
       { score: 'x', spheres: null, units: 'nope', cores: 7, t: 3 }, // 配列性すら壊れたフレーム
+      { score: [2, 2], spheres: [0, 0, 0], timer: 100, units: [ // プロトタイプ汚染kind攻撃(PROC_TOKEN_BUILDERSのプロトタイプ鎖を踏ませる)
+        { id: 201, kind: '__proto__', team: 'blue', x: 1, y: 0, z: 1, yaw: 0, hp: 1, mhp: 1, alive: true },
+        { id: 202, kind: 'constructor', team: 'blue', x: 2, y: 0, z: 2, yaw: 0, hp: 1, mhp: 1, alive: true },
+        { id: 203, kind: 'valueOf', team: 'red', x: 3, y: 0, z: 3, yaw: 0, hp: 1, mhp: 1, alive: true },
+        { id: 204, kind: 'toString', team: 'red', x: 4, y: 0, z: 4, yaw: 0, hp: 1, mhp: 1, alive: true },
+      ], cores: [], t: 3.55 },
       { score: [2, 2], spheres: [0, 0, 0], timer: 100, units: flood, cores: flood.map(() => ({ x: 0, z: 0, s: false })), t: 3.5 }, // 長さ攻撃
     ]
     let threw = false
@@ -1842,6 +1848,37 @@ window.addEventListener('resize', () => {
     r.ok = r.predictionTight
     host.dispose(); client.dispose()
     return r
+  },
+  // sprint予測一致の回帰検証(第18監査): Shift未押下の純前進(KeyWのみ, mx=0)。旧コードはhostが移動からsprintを幾何推定し
+  // sprint=true(8.5)に倒れ、client予測(歩6)と前進時に定常乖離→自機が周期x/zスナップした。修正後はhostがni.sprintを
+  // 読むため両者 歩6 で一致しdriftが収束する。これが無いとnetPredictTest(常にmx=±1)はこのmx=0ケースを踏まず取りこぼす。
+  netPredictSprintTest(latencyMs = 80, jitterMs = 30) {
+    const [h, c] = LoopbackTransport.pair(latencyMs, true, jitterMs)
+    const noop = () => {}
+    const host = new BattleView({ charKey: 'renji', botLevel: 6, practice: false, mapKey: 'skyhaven' }, noop, { transport: h, role: 'host', oppCharKey: 'mimi' })
+    const client = new BattleView({ charKey: 'mimi', botLevel: 6, practice: false, mapKey: 'skyhaven' }, noop, { transport: c, role: 'client', oppCharKey: 'renji' })
+    client.player.pos.copy(client.world.basePos.red); client.player.group.position.copy(client.player.pos)
+    client.player.yaw = Math.PI // +z(中央方向)を向く=赤スポーンから開けた方向へ前進(場外/壁を避ける)
+    const savedKeys = [...input.keys]
+    const dtMs = 1000 / 60
+    let maxDrift = 0, nanSeen = false, snapWouldFire = 0, samples = 0
+    try {
+      for (let f = 0; f < 120; f++) {
+        if (f > 30) { // 定常化後の補正前ドリフトを測る
+          const drift = Math.hypot(client.player.pos.x - host.bot.group.position.x, client.player.pos.z - host.bot.group.position.z)
+          if (isNaN(drift)) nanSeen = true
+          maxDrift = Math.max(maxDrift, drift); samples++
+          if (drift > 3) snapWouldFire++
+        }
+        input.keys.clear(); input.keys.add('KeyW') // Shift無し純前進=mx0,mz1,sprint無し(=旧コードで乖離した条件)
+        client.player.yaw = Math.PI
+        host.update(1 / 60); client.update(1 / 60)
+        h.advance(dtMs); c.advance(dtMs)
+      }
+    } finally { input.keys.clear(); for (const k of savedKeys) input.keys.add(k) }
+    const ok = !nanSeen && maxDrift < 1.5 && snapWouldFire === 0
+    host.dispose(); client.dispose()
+    return { ok, maxDriftM: +maxDrift.toFixed(3), snapWouldFire, samples, noNaN: !nanSeen }
   },
   // PvP一時停止の凍結回避検証: オンラインではポインタ解除("一時停止")でも update が早期returnせず、
   // snapshot適用/入力送信を続ける(=対戦が凍結しない)ことを確認。オフラインは従来どおり凍結する。

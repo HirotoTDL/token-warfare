@@ -472,7 +472,11 @@ export function buildProceduralUnit(kind: string, team: Team, charKey?: string, 
   if (kind === 'commander') return buildMonsterCommander(characterByKey(charKey ?? 'renji'), team)
   if (kind === 'decoy') return buildDecoy(characterByKey(charKey ?? 'renji'), team)
   if (kind === 'wallpod') return buildWall(team, wallAlongX)
-  const builder = PROC_TOKEN_BUILDERS[kind]
+  // hasOwnProperty で引く: PROC_TOKEN_BUILDERS はプレーンオブジェクトなので、非信頼peer由来の kind に
+  // '__proto__'/'constructor'/'valueOf'/'toString' 等が来るとプロトタイプ鎖の値(関数/オブジェクト)を拾い、
+  // builder(team) で TypeError か非Group返却→呼び出し側のtraverseで例外→client毎フレームフリーズ(DoS)になる。
+  // 自前キーのみ採用し、それ以外は下の安全な箱フォールバックへ落とす。
+  const builder = Object.prototype.hasOwnProperty.call(PROC_TOKEN_BUILDERS, kind) ? PROC_TOKEN_BUILDERS[kind] : undefined
   if (builder) return builder(team)
   // 未知kind(本来到達しない)の最終手段
   const g = new THREE.Group()
