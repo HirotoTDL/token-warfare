@@ -74,6 +74,7 @@ export class RemoteCommander implements Unit {
   private burstLeft = 0 // バースト武器(リコ等)の残発数。PlayerCommanderと同じ3点バースト挙動を再現
   private burstT = 0
   private pendingFire = false // セミオート発砲エッジ(クリック)の蓄積。update毎に1回だけ消費(ローカルのendFrameクリアと対称)
+  hits = 0 // 命中数(client=赤の弾が命中した回数)。host集約しmatchEndでclientへ返し、結果画面の命中率算出に使う(改善#9)
   private lastInputT = 0 // 最後に入力フレームを受理した実時刻(performance.now)。鮮度判定用(停滞中の暴走防止)
   private lastFireT = 0
   private coyote = 0
@@ -455,8 +456,8 @@ export class RemoteCommander implements Unit {
     this.sfx.shot(true)
   }
 
-  /** 着弾コールバック(combatから。命中演出/集計はホスト集約) */
-  onBoltHit(_target: Unit) {}
+  /** 着弾コールバック(combatから)。命中数を集約しmatchEndでclientへ返す(client結果画面の命中率算出用、改善#9) */
+  onBoltHit(_target: Unit) { this.hits++ }
 
   private overlaps(c: { min: THREE.Vector3; max: THREE.Vector3 }) {
     return (

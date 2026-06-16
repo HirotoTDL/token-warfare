@@ -388,6 +388,10 @@ class BattleView implements View {
   private hitstopT = 0
   /** プレイヤー戦績 */
   stats = { dmgDealt: 0, dmgTaken: 0, tokenKills: 0, cores: 0, tpEarned: 0 }
+  /** host: 相手(client=赤)の戦績集約。matchEndでclientへ返し、赤側の結果画面を実値化する(改善#9) */
+  private oppStats = { tokenKills: 0, cores: 0, tpEarned: 0 }
+  /** client: hostから受領した自分(赤)の戦績(命中率/トークン撃破/コア回収)。null=未受領 */
+  clientResultStats: { acc: number; tk: number; co: number; tp: number } | null = null
   /** チュートリアルTIP(最初の3試合のみ、各1回) */
   private tipsEnabled = false
   private tipsShown = new Set<string>()
@@ -478,6 +482,18 @@ class BattleView implements View {
         } else if (ch === 'event' && data && data.type === 'matchEnd') {
           // ホストがマッチ終了(占領達成/時間切れ/サドンデス)→クライアントも確定スコアで終了
           if (!this.over && Array.isArray(data.score) && Number.isFinite(data.score[0]) && Number.isFinite(data.score[1])) {
+            // host集約の自分(赤)戦績を取り込む(改善#9)。非信頼host由来なので有限性検証し、命中率は host hits / client自前shotsFired。
+            const st = data.st
+            if (st && typeof st === 'object') {
+              const fin2 = (v: any) => typeof v === 'number' && Number.isFinite(v)
+              const fired = this.player.shotsFired
+              this.clientResultStats = {
+                acc: fired > 0 && fin2(st.hit) ? Math.round((Math.min(st.hit, fired) / fired) * 100) : 0,
+                tk: fin2(st.tk) ? Math.max(0, Math.floor(st.tk)) : 0,
+                co: fin2(st.co) ? Math.max(0, Math.floor(st.co)) : 0,
+                tp: fin2(st.tp) ? Math.max(0, Math.floor(st.tp)) : 0,
+              }
+            }
             this.scores.blue = data.score[0]; this.scores.red = data.score[1]; this.finish()
           }
         }
@@ -551,6 +567,8 @@ class BattleView implements View {
       if (killer === this.player) {
         this.stats.tokenKills++
         sfx.hitmarker()
+      } else if (this.net && killer === this.bot) {
+        this.oppStats.tokenKills++ // host: 相手(client=赤)のトークン撃破を集約(改善#9)
       }
     }
 
@@ -605,6 +623,9 @@ class BattleView implements View {
       this.stats.tpEarned += tp
       sfx.core()
       this.hud.message(`コア回収 +${tp}TP`)
+    } else if (this.net && collector === this.bot) {
+      this.oppStats.cores++ // host: 相手(client=赤)のコア回収を集約(改善#9)
+      this.oppStats.tpEarned += tp
     }
   }
 
@@ -657,8 +678,13 @@ class BattleView implements View {
     sfx.sting(won || drawn)
     bgm.jingle(drawn ? 'draw' : won ? 'win' : 'lose')
     input.exitLock()
-    // ホスト権威: あらゆる終了条件(占領達成/時間切れ/サドンデス)をクライアントへ伝える(クライアントの取りこぼし防止)
-    if (this.isHost && this.net) this.net.transport.send('event', { type: 'matchEnd', score: [this.scores.blue, this.scores.red] })
+    // ホスト権威: あらゆる終了条件(占領達成/時間切れ/サドンデス)をクライアントへ伝える(クライアントの取りこぼし防止)。
+    // 併せて client(赤)の戦績を同梱: client は権威simが無く命中/撃破/コアを自前集計できないため、host集約値を返して
+    // 結果画面を実値化する(改善#9。命中率= host集約hits / client自前shotsFired)。
+    if (this.isHost && this.net) {
+      const oppHits = (this.bot as any)?.hits ?? 0
+      this.net.transport.send('event', { type: 'matchEnd', score: [this.scores.blue, this.scores.red], st: { tk: this.oppStats.tokenKills, co: this.oppStats.cores, tp: this.oppStats.tpEarned, hit: oppHits } })
+    }
   }
 
   /** ホスト: 20Hzで権威スナップショットを配信 */
@@ -1066,13 +1092,15 @@ function startBattle(charKey: string, net: { transport: NetTransport; role: NetR
       // オンラインclient(赤)は権威simを持たず命中/トークン撃破/コア回収を計測できない(world.unitsが自機のみ・onKill/onCore未発火)
       // ため、0固定の誤表示ではなく '---' にする。与/被ダメはsnapshotから算出できるので表示する。
       const onlineClient = lastWasOnline && myTeam === 'red'
+      // client(赤)はhost集約戦績(matchEndで受領)があれば実値表示、無ければ(切断等で未受領)従来どおり'---'(改善#9)
+      const cs = b.clientResultStats
       document.getElementById('result-stats')!.innerHTML = [
         ['与ダメージ', Math.round(b.stats.dmgDealt)],
         ['被ダメージ', Math.round(b.stats.dmgTaken)],
-        ['命中率', onlineClient ? '---' : `${acc}%`],
-        ['トークン撃破', onlineClient ? '---' : b.stats.tokenKills],
+        ['命中率', onlineClient ? (cs ? `${cs.acc}%` : '---') : `${acc}%`],
+        ['トークン撃破', onlineClient ? (cs ? cs.tk : '---') : b.stats.tokenKills],
         ['配備', b.player.deploysCount],
-        ['コア回収', onlineClient ? '---' : `${b.stats.cores}(+${b.stats.tpEarned}TP)`],
+        ['コア回収', onlineClient ? (cs ? `${cs.co}(+${cs.tp}TP)` : '---') : `${b.stats.cores}(+${b.stats.tpEarned}TP)`],
       ]
         .map(([k, v]) => `<div class="rs-item"><span>${k}</span><b>${v}</b></div>`)
         .join('')
@@ -1649,11 +1677,13 @@ window.addEventListener('resize', () => {
     let clientEndJingle: string | null = null
     const origJingle = (bgm as any).jingle.bind(bgm)
     ;(bgm as any).jingle = (k: string) => { clientEndJingle = k; return origJingle(k) }
-    h.send('event', { type: 'matchEnd', score: [30, 5] })
+    h.send('event', { type: 'matchEnd', score: [30, 5], st: { tk: 3, co: 2, tp: 14, hit: 7 } }) // 改善#9: client戦績同梱
     for (let f = 0; f < 4; f++) { host.update(1 / 60); client.update(1 / 60) }
     ;(bgm as any).jingle = origJingle
     const matchEndSynced = client.over === true && client.scores.blue === 30
     const clientLossPerspective = clientEndJingle === 'lose' // 自陣(赤)視点で敗北の音が鳴る(true期待)
+    const cs = (client as any).clientResultStats // host集約戦績を受領できたか(改善#9)
+    const clientStatsReceived = !!cs && cs.tk === 3 && cs.co === 2 && cs.tp === 14 // 命中率はshotsFired依存なので個数のみ検証
     // クライアントのpuppet群(ホストの青将renji等)の位置を取得
     const pm = (client as any).puppets
     const puppetCount = (pm as any).puppets.size
@@ -1683,8 +1713,9 @@ window.addEventListener('resize', () => {
       suddenDeathSynced, // ホストのサドンデス→snapshot.sd→クライアントも同期(true期待)
       matchEndSynced, // ホストの終了通知→クライアントも終了(true期待)
       clientLossPerspective, // 自陣(赤)視点で敗北ジングルが鳴る=勝敗の音が逆転しない(true期待)
+      clientStatsReceived, // matchEndに同梱したclient戦績(撃破/コア)をclientが受領(true期待, 改善#9)
       clientCombatFeedback: { dealt: Math.round(client.stats.dmgDealt), taken: Math.round(client.stats.dmgTaken) }, // 相手被弾→dealt, 自機被弾→taken(両>0期待)
-      ok: snapsSeen > 0 && puppetCount > 0 && clientVisualBolts > 0 && deploySpawnedToken && redTokenBoltRelayed && ownCommanderBoltNotRelayed && skillActivated && clientSphereCaptureFeedback && clientMomentumWhenBehind && clientDeathCountdown && clientRespawnCleared && suddenDeathSynced && matchEndSynced && clientLossPerspective && client.stats.dmgDealt > 0 && client.stats.dmgTaken > 0,
+      ok: snapsSeen > 0 && puppetCount > 0 && clientVisualBolts > 0 && deploySpawnedToken && redTokenBoltRelayed && ownCommanderBoltNotRelayed && skillActivated && clientSphereCaptureFeedback && clientMomentumWhenBehind && clientDeathCountdown && clientRespawnCleared && suddenDeathSynced && matchEndSynced && clientLossPerspective && clientStatsReceived && client.stats.dmgDealt > 0 && client.stats.dmgTaken > 0,
     } as any
     // 切断ハンドリング検証: クライアント切断→両者のマッチがover(フリーズしない)
     c.close()
