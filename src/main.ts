@@ -681,7 +681,9 @@ class BattleView implements View {
     const sphOk = Array.isArray(sp) && fin(sp[0]) && fin(sp[1]) && fin(sp[2])
     if (scoreOk) { this.scores.blue = sc[0]; this.scores.red = sc[1] }
     if (fin(snap.timer)) this.timer = snap.timer
-    if (!scoreOk || !sphOk) return // スコア/スフィアが壊れたフレームは以降の演出・勝敗判定をスキップ(直前の健全値を保持)
+    // units も同じ非信頼host方針で検証: 配列でないフレームは以降のfind()やpuppet ingestが throw し、
+    // 自機の死亡/リスポーン/勝敗判定の末尾(752-)が走らなくなる。スコア同様「壊れたフレームは捨てる」。
+    if (!scoreOk || !sphOk || !Array.isArray(snap.units)) return
     // 試合フェーズ(OT/サドンデス)の告知はホスト権威simの中だけで鳴っていてクライアントに来ていなかった。
     // snapshotのtimer/sdから遷移を検出し、クライアントでも告知バナー+BGM+SEを鳴らす(HUDのOT/SD表示もthis.suddenDeathに依存)。
     const wasSudden = this.suddenDeath
@@ -713,7 +715,7 @@ class BattleView implements View {
     o.base.red.snapContested = cont ? !!cont[2] : false
     for (const s of o.spheres) s.update(_dt)
     // ミニマップ用: コアと敵将reveal(ソナー)をホスト権威から反映(clientは権威simが無く自前で持てない)。
-    this.clientCores = (snap.cores ?? []).map((c) => ({ x: c.x, z: c.z, small: c.s }))
+    this.clientCores = (Array.isArray(snap.cores) ? snap.cores : []).map((c) => ({ x: c.x, z: c.z, small: c.s }))
     this.world.revealT.blue = snap.reveal ? snap.reveal[0] : 0 // 敵将(青)reveal=clientが自分のソナーで点滅表示
     this.world.revealT.red = snap.reveal ? snap.reveal[1] : 0   // 自機(赤)がreveal=被捕捉
     const redRevealed = this.world.revealT.red > 0
