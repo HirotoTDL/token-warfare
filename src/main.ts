@@ -1862,6 +1862,47 @@ window.addEventListener('resize', () => {
     run()
     return 'started — poll window.__netTestResultRTC'
   },
+  // クライアント側の描画を実機なしで目視する診断: ループバックでホストを駆動しつつ、本物の startBattle 経路で
+  // クライアント(view)を描画する。相手将/トークンがpuppetとしてどう描画されるか screenshot で確認できる。
+  // 停止: window.__rcStop = true。ホスト参照: window.__rcHost。
+  renderClientMatch() {
+    const [h, c] = LoopbackTransport.pair(30, false) // 実時間setTimeout遅延30ms(描画ループと同時に配送)
+    const noop = () => {}
+    const host = new BattleView({ charKey: 'renji', botLevel: 6, practice: false, mapKey: 'skyhaven' }, noop, { transport: h, role: 'host', oppCharKey: 'mimi' })
+    ;(window as any).__rcHost = host
+    ;(window as any).__rcStop = false
+    startBattle('mimi', { transport: c, role: 'client', oppCharKey: 'renji' }) // view=client を描画ループが回す
+    let f = 0
+    const loop = () => {
+      if ((window as any).__rcStop) return
+      f++
+      host.player.pos.set(Math.sin(f / 70) * 3, 0, 4 + Math.cos(f / 70) * 2) // 青将を中央付近で動かす(puppet追従が見える)
+      host.player.group.position.copy(host.player.pos)
+      if (f === 40) c.send('event', { type: 'deploy', key: 'gunner', x: 1.5, z: 3 }) // 赤トークンも配備→puppet
+      host.update(1 / 60)
+      requestAnimationFrame(loop)
+    }
+    requestAnimationFrame(loop)
+    return 'client rendering. window.__tw.battle=client. screenshotで相手将/トークンpuppetの描画を確認。__rcStop=trueで停止。'
+  },
+  // クライアントのpuppetモデル差し替え検証: 対戦開始時にGLB未ロードだと敵が箱(placeholder)になる不具合の修正確認。
+  // ①存在しないckで生成→placeholder(箱) ②modelKeyを実在キーへ差し替え再ingest→tryUpgradeで本物(SkinnedMesh)へ。
+  netPuppetUpgradeTest() {
+    const scene = new THREE.Scene()
+    const pm = new PuppetManager(scene)
+    pm.setLocalCommanderTeam('red')
+    const mkSnap = (ck: string): any => ({ t: 0, units: [{ id: 99, kind: 'commander', team: 'blue', ck, x: 0, y: 0, z: 0, yaw: 0, hp: 100, mhp: 100, alive: true }], spheres: [0, 0, 0], score: [0, 0], timer: 180 })
+    pm.ingest(mkSnap('__nomodel__')) // GLB未ロード/未知キーを模擬→placeholder(箱)
+    const p = (pm as any).puppets.get(99)
+    const wasPlaceholder = p?.placeholder === true
+    let boxBefore = false; p?.group.traverse((o: any) => { if (o.isMesh && !o.isSkinnedMesh && o.geometry?.type === 'BoxGeometry') boxBefore = true })
+    p.modelKey = 'char_renji' // 実モデルが読めた状況を模擬(キーを実在のものへ)
+    pm.ingest(mkSnap('__nomodel__')) // 同id再受信→else if(placeholder)→tryUpgradeで本物へ差し替え
+    const upgraded = p.placeholder === false
+    let skinnedAfter = false; p.group.traverse((o: any) => { if (o.isSkinnedMesh) skinnedAfter = true })
+    pm.dispose()
+    return { wasPlaceholder, boxBefore, upgraded, hasSkinnedMeshAfter: skinnedAfter, ok: wasPlaceholder && boxBefore && upgraded && skinnedAfter }
+  },
 }
 
 // --- メインループ ---

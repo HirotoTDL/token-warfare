@@ -75,6 +75,10 @@ interface Puppet {
   mhp: number
   fill: THREE.Sprite // HPバーの残量(scale.xで増減・色で残量表現)
   fillMat: THREE.SpriteMaterial
+  modelKey: string // 採用すべきGLBキー(char_*/token_*)。代替表示からの差し替え判定用
+  team: Team // 差し替え時に getModel へ渡す陣営
+  kind: string // HPバー再生成用
+  placeholder: boolean // 実GLB未ロードで代替(箱)を出しているか。trueの間は実モデルが読めたら差し替える
 }
 
 /**
@@ -110,14 +114,21 @@ export class PuppetManager {
       present.add(u.id)
       let p = this.puppets.get(u.id)
       if (!p) {
-        const model = this.buildModel(u)
+        const built = this.buildModelFor(u)
         const bar = this.buildHpBar(u.kind)
-        model.add(bar.group)
-        this.group.add(model)
-        p = { group: model, buffer: [], seen: this.clock, hp: u.hp, mhp: u.mhp, fill: bar.fill, fillMat: bar.fillMat }
+        built.group.add(bar.group)
+        this.group.add(built.group)
+        p = {
+          group: built.group, buffer: [], seen: this.clock, hp: u.hp, mhp: u.mhp,
+          fill: bar.fill, fillMat: bar.fillMat,
+          modelKey: this.keyFor(u), team: u.team, kind: u.kind, placeholder: built.placeholder,
+        }
         this.puppets.set(u.id, p)
-        model.position.set(u.x, u.y, u.z)
-        model.rotation.y = u.yaw
+        built.group.position.set(u.x, u.y, u.z)
+        built.group.rotation.y = u.yaw
+      } else if (p.placeholder) {
+        // 対戦開始時にGLB未ロードで代替(箱)を出していた場合、実モデルが読めたら差し替える(=参加者側で敵が箱のままになる不具合の解消)
+        this.tryUpgrade(p)
       }
       // 受信サンプルをクライアントクロックでスタンプしてバッファへ(update()がinterpDelay分だけ過去を再生)
       p.buffer.push({ t: this.clock, x: u.x, y: u.y, z: u.z, yaw: u.yaw })
@@ -191,19 +202,46 @@ export class PuppetManager {
     return this.puppets.has(id)
   }
 
-  private buildModel(u: UnitSnap): THREE.Group {
-    const key = u.kind === 'commander' || u.kind === 'decoy' ? `char_${u.ck ?? 'renji'}` : `token_${u.kind}`
-    const m = getModel(key, u.team)
-    if (m) return m
-    // フォールバック: 種別が分かる簡易プレースホルダ(GLB未ロード/未知kind時)
+  /** このユニットが採用すべきGLBキー(char_ または token_ 接頭) */
+  private keyFor(u: UnitSnap): string {
+    return u.kind === 'commander' || u.kind === 'decoy' ? `char_${u.ck ?? 'renji'}` : `token_${u.kind}`
+  }
+
+  /** 実GLBがあればそれを、未ロードなら代替の箱を返す(placeholder=true) */
+  private buildModelFor(u: UnitSnap): { group: THREE.Group; placeholder: boolean } {
+    const m = getModel(this.keyFor(u), u.team)
+    if (m) return { group: m, placeholder: false }
+    return { group: this.fallbackBox(u.kind, u.team), placeholder: true }
+  }
+
+  /** 種別が分かる簡易プレースホルダ(GLB未ロード/未知kind時)。実モデルが後で読めれば tryUpgrade で差し替える */
+  private fallbackBox(kind: string, team: Team): THREE.Group {
     const g = new THREE.Group()
+    const h = kind === 'commander' || kind === 'decoy' ? 1.7 : 0.8
     const box = new THREE.Mesh(
-      new THREE.BoxGeometry(0.6, u.kind === 'commander' ? 1.7 : 0.8, 0.6),
-      new THREE.MeshStandardMaterial({ color: u.team === 'blue' ? 0x3da8ff : 0xff5040 }),
+      new THREE.BoxGeometry(0.6, h, 0.6),
+      new THREE.MeshStandardMaterial({ color: team === 'blue' ? 0x3da8ff : 0xff5040 }),
     )
-    box.position.y = (u.kind === 'commander' ? 1.7 : 0.8) / 2
+    box.position.y = h / 2
     g.add(box)
     return g
+  }
+
+  /** 代替表示中のpuppetを、実GLBが読み込めたら本物に差し替える(transform/可視/HPバーを引き継ぐ) */
+  private tryUpgrade(p: Puppet) {
+    const real = getModel(p.modelKey, p.team)
+    if (!real) return // まだ読み込めていない→次のスナップショットで再試行
+    const bar = this.buildHpBar(p.kind)
+    real.add(bar.group)
+    real.position.copy(p.group.position)
+    real.rotation.y = p.group.rotation.y
+    real.visible = p.group.visible
+    this.group.remove(p.group)
+    this.group.add(real)
+    p.group = real
+    p.fill = bar.fill
+    p.fillMat = bar.fillMat
+    p.placeholder = false
   }
 
   dispose() {
