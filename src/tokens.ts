@@ -278,7 +278,7 @@ class GunnerUnit extends TokenUnit {
   private supplyT = 0
 
   constructor(world: World, combat: Combat, sfx: Sfx, team: Team, pos: THREE.Vector3) {
-    super(world, combat, sfx, team, 'gunner', 'ガンナー', resolveModel('token_gunner', team, () => buildGunner(team)), pos, 190, 0.4, 1.3)
+    super(world, combat, sfx, team, 'gunner', 'ガンナー', resolveModel('token_gunner', team, () => buildGunner(team)), pos, 145, 0.4, 1.3)
     this.activeT = 0.7
   }
 
@@ -363,7 +363,7 @@ class SentryUnit extends TokenUnit {
   private fireCd = 0
 
   constructor(world: World, combat: Combat, sfx: Sfx, team: Team, pos: THREE.Vector3) {
-    super(world, combat, sfx, team, 'sentry', 'セントリー', resolveModel('token_sentry', team, () => buildSentry(team)), pos, 400, 0.55, 1.25)
+    super(world, combat, sfx, team, 'sentry', 'セントリー', resolveModel('token_sentry', team, () => buildSentry(team)), pos, 305, 0.55, 1.25)
     // GLBモデルにはヘッドが無いため、その場合は本体ごと旋回する
     this.head = (this.group.userData.head as THREE.Object3D) ?? this.group
     this.activeT = 1.0 // 設置後1秒は起動待機(配置を読まれる猶予)
@@ -413,7 +413,7 @@ class HealDroneUnit extends TokenUnit {
   private orbitT = Math.random() * 6
 
   constructor(world: World, combat: Combat, sfx: Sfx, team: Team, pos: THREE.Vector3) {
-    super(world, combat, sfx, team, 'healer', 'ヒールドローン', resolveModel('token_healer', team, () => buildHealDrone(team)), pos, 140, 0.35, 0.6)
+    super(world, combat, sfx, team, 'healer', 'ヒールドローン', resolveModel('token_healer', team, () => buildHealDrone(team)), pos, 105, 0.35, 0.6)
     this.group.position.y = 1.4
     this.activeT = 0.8
   }
@@ -480,7 +480,7 @@ class StrikerUnit extends TokenUnit {
   private chaseT = 0
 
   constructor(world: World, combat: Combat, sfx: Sfx, team: Team, pos: THREE.Vector3) {
-    super(world, combat, sfx, team, 'striker', 'ストライカー', resolveModel('token_striker', team, () => buildStriker(team)), pos, 175, 0.4, 0.6)
+    super(world, combat, sfx, team, 'striker', 'ストライカー', resolveModel('token_striker', team, () => buildStriker(team)), pos, 133, 0.4, 0.6)
     this.activeT = 0.6
   }
 
@@ -520,7 +520,7 @@ class SpiderMineUnit extends TokenUnit {
   private chaseT = 0
 
   constructor(world: World, combat: Combat, sfx: Sfx, team: Team, pos: THREE.Vector3) {
-    super(world, combat, sfx, team, 'mine', 'スパイダーマイン', resolveModel('token_mine', team, () => buildSpiderMine(team)), pos, 105, 0.3, 0.5)
+    super(world, combat, sfx, team, 'mine', 'スパイダーマイン', resolveModel('token_mine', team, () => buildSpiderMine(team)), pos, 80, 0.3, 0.5)
     this.lamp = (this.group.userData.lamp as THREE.MeshStandardMaterial) ?? null
     this.activeT = 0.8 // 設置後0.8秒は不活性(踏む前に視認・破壊する猶予)
   }
@@ -567,7 +567,7 @@ class WallPodUnit extends TokenUnit {
     // 壁は配備者の向きに対して垂直(=正面を塞ぐ)。AABB制約のため軸スナップ
     const d = dir ?? new THREE.Vector3(0, 0, 1)
     const alongX = Math.abs(d.z) >= Math.abs(d.x) // 進行方向がz軸なら壁はx方向に伸びる
-    super(world, combat, sfx, team, 'wallpod', 'ウォールポッド', buildWall(team, alongX), pos, 520, 0.5, 2.2)
+    super(world, combat, sfx, team, 'wallpod', 'ウォールポッド', buildWall(team, alongX), pos, 395, 0.5, 2.2)
     const w = alongX ? 3 : 0.42
     const dd = alongX ? 0.42 : 3
     this.box = {
@@ -610,7 +610,7 @@ class BoosterUnit extends TokenUnit {
   private pulseT = 0
 
   constructor(world: World, combat: Combat, sfx: Sfx, team: Team, pos: THREE.Vector3) {
-    super(world, combat, sfx, team, 'booster', 'ブースターパイロン', resolveModel('token_booster', team, () => buildBooster(team)), pos, 280, 0.45, 1.2)
+    super(world, combat, sfx, team, 'booster', 'ブースターパイロン', resolveModel('token_booster', team, () => buildBooster(team)), pos, 213, 0.45, 1.2)
     this.crystal = (this.group.userData.crystal as THREE.Object3D) ?? null
     this.activeT = 1.0 // 起動まで1秒はオーラ無効(armed=falseでworld側がゲート)
   }
@@ -638,7 +638,7 @@ class ChaserUnit extends TokenUnit {
   private pathT = 0
 
   constructor(world: World, combat: Combat, sfx: Sfx, team: Team, pos: THREE.Vector3) {
-    super(world, combat, sfx, team, 'chaser', 'チェイサー', resolveModel('token_chaser', team, () => buildChaser(team)), pos, 175, 0.35, 0.7)
+    super(world, combat, sfx, team, 'chaser', 'チェイサー', resolveModel('token_chaser', team, () => buildChaser(team)), pos, 133, 0.35, 0.7)
     this.activeT = 0.5
   }
 
@@ -689,7 +689,7 @@ class BomberUnit extends TokenUnit {
   private target: Unit | null = null
 
   constructor(world: World, combat: Combat, sfx: Sfx, team: Team, pos: THREE.Vector3) {
-    super(world, combat, sfx, team, 'bomber', 'ボムスリンガー', resolveModel('token_bomber', team, () => buildBomber(team)), pos, 310, 0.5, 1.0)
+    super(world, combat, sfx, team, 'bomber', 'ボムスリンガー', resolveModel('token_bomber', team, () => buildBomber(team)), pos, 236, 0.5, 1.0)
     this.activeT = 1.0
   }
 
@@ -747,7 +747,7 @@ class BomberUnit extends TokenUnit {
 /** ジャマーポッド: 半径9mの敵索敵を妨害(world.senseRangeMul経由) */
 class JammerUnit extends TokenUnit {
   constructor(world: World, combat: Combat, sfx: Sfx, team: Team, pos: THREE.Vector3) {
-    super(world, combat, sfx, team, 'jammer', 'ジャマーポッド', resolveModel('token_jammer', team, () => buildJammer(team)), pos, 240, 0.4, 1.1)
+    super(world, combat, sfx, team, 'jammer', 'ジャマーポッド', resolveModel('token_jammer', team, () => buildJammer(team)), pos, 182, 0.4, 1.1)
     this.activeT = 0.9 // 起動まで0.9秒は妨害無効(armed=falseでworld側がゲート)
   }
 
@@ -767,7 +767,7 @@ class SniperDroneUnit extends TokenUnit {
   private home: THREE.Vector3
 
   constructor(world: World, combat: Combat, sfx: Sfx, team: Team, pos: THREE.Vector3) {
-    super(world, combat, sfx, team, 'sniperdrone', 'スナイパードローン', resolveModel('token_sniperdrone', team, () => buildSniperDrone(team)), pos, 120, 0.35, 0.6)
+    super(world, combat, sfx, team, 'sniperdrone', 'スナイパードローン', resolveModel('token_sniperdrone', team, () => buildSniperDrone(team)), pos, 91, 0.35, 0.6)
     this.home = pos.clone()
     this.group.position.y = 3.2
     this.activeT = 1.0
@@ -806,7 +806,7 @@ export class DecoyUnit extends TokenUnit {
   private lifeT = 6
 
   constructor(world: World, combat: Combat, sfx: Sfx, team: Team, pos: THREE.Vector3, char: CharacterDef, yaw: number) {
-    super(world, combat, sfx, team, 'decoy', 'デコイ', resolveModel(`char_${char.key}`, team, () => buildDecoy(char, team)), pos, 210, 0.45, 1.8)
+    super(world, combat, sfx, team, 'decoy', 'デコイ', resolveModel(`char_${char.key}`, team, () => buildDecoy(char, team)), pos, 160, 0.45, 1.8)
     this.group.rotation.y = yaw
   }
 
