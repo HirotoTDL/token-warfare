@@ -266,13 +266,16 @@ export class BotCommander implements Unit {
     // (=敵スフィアの奥=敵スポーンに張り付かない/リスキル回避)へフォールバック。
     const losEye = new THREE.Vector3()
     const approach = (sp: { pos: THREE.Vector3 }, isCenter: boolean): THREE.Vector3 => {
+      // スフィア近傍(≤14m)でLOSが通るカバー点のうち、ボットに最も近い=到達しやすい点を選ぶ
+      // (中央は地上の射線が構造物に遮られるが、LOSが通る地上カバー点が数点あるのでそこに立って撃つ)。
       let best: THREE.Vector3 | null = null, bd = Infinity
       for (const cp of this.world.coverPoints) {
         const d = flatDist(cp, sp.pos)
         if (d > 14 || d < 2) continue
         losEye.set(cp.x, cp.y + 1.45, cp.z)
         if (!this.world.hasLOS(losEye, sp.pos)) continue
-        if (d < bd) { bd = d; best = cp }
+        const dSelf = flatDist(cp, this.group.position)
+        if (dSelf < bd) { bd = dSelf; best = cp }
       }
       if (best) return best.clone()
       const toward = isCenter ? this.group.position : center
@@ -566,6 +569,22 @@ export class BotCommander implements Unit {
     }
     const speedMul = this.charging ? 0.5 : 1
     const t = this.target
+    // 占領位置への精密接近: スフィアのLOSは位置にシビア(中央は数十cmずれると射線が切れる)。
+    // 優先スフィア狙いで moveTarget(=LOSが通るカバー点)の至近に来たら、ぴったり乗るまで微速で寄せて保持する。
+    const csp = !this.charging ? this.priorityCapture() : null
+    if (csp && this.moveTarget && flatDist(this.moveTarget, csp.pos) < 15 && flatDist(this.moveTarget, p) < 3.5) {
+      const threatClose = t && t.alive && !t.stealthed && flatDist(t.group.position, p) <= 14
+      if (!threatClose) {
+        const off = flatDist(this.moveTarget, p)
+        if (off > 0.25) {
+          const dir = this.moveTarget.clone().sub(p).setY(0).normalize()
+          p.addScaledVector(dir, Math.min(off, 2.6 * dt))
+          this.collide()
+          this.bobWalk(2.6)
+        }
+        return // 精密保持(間合いstrafe/経路追従より優先)
+      }
+    }
     // 自分の武器が活きる距離でのみ足を止めて撃ち合う。
     // 射程外ならカバー伝いに距離を詰め続ける(超近距離型ほど我慢して詰める)
     const engageThreshold = this.idealRange() < 11 ? 0.8 : 0.55
