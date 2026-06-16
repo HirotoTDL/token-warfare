@@ -368,6 +368,7 @@ class BattleView implements View {
   private clientLastScoreBlue = 0 // client: 前回スコア(占領カウント加算トーストの検出用)
   private clientLastScoreRed = 0
   over = false
+  oppForfeited = false // online: 相手がマッチ中に切断/退出した(=残存側の不戦勝)。結果がスコアに依らずWINになる
   everLocked = false
   timer = MATCH_TIME
   objectives!: Objectives
@@ -503,7 +504,10 @@ class BattleView implements View {
           // dispose() は冪等ガード無しで必ず peer/conn を破棄するので、ここで呼べば 'closed' 経路のリークを塞げる。
           try { this.net?.transport.dispose?.() } catch { /* noop */ }
           if (!this.over) {
-            this.hud.killBanner('相手が切断しました', true)
+            // 相手がマッチ中に切断/退出=残存側の不戦勝。結果がスコア依存で誤LOSE/DRAWになる(リーバー逃げ得)のを防ぐため
+            // フラグを立て、finish()/結果画面が勝敗をWINに確定する(自陣スコアは改ざんせず実値のまま表示)。
+            this.oppForfeited = true
+            this.hud.killBanner('相手が切断しました — あなたの不戦勝', true)
             this.hud.warn('⚠ 通信が切断されました — マッチ終了', 5)
             this.finish()
           }
@@ -648,8 +652,10 @@ class BattleView implements View {
     // host/オフラインは player.team='blue' なので従来どおり。
     const myScore = this.player.team === 'blue' ? this.scores.blue : this.scores.red
     const theirScore = this.player.team === 'blue' ? this.scores.red : this.scores.blue
-    sfx.sting(myScore >= theirScore)
-    bgm.jingle(myScore === theirScore ? 'draw' : myScore > theirScore ? 'win' : 'lose')
+    const won = this.oppForfeited || myScore > theirScore // 相手切断=不戦勝
+    const drawn = !this.oppForfeited && myScore === theirScore
+    sfx.sting(won || drawn)
+    bgm.jingle(drawn ? 'draw' : won ? 'win' : 'lose')
     input.exitLock()
     // ホスト権威: あらゆる終了条件(占領達成/時間切れ/サドンデス)をクライアントへ伝える(クライアントの取りこぼし防止)
     if (this.isHost && this.net) this.net.transport.send('event', { type: 'matchEnd', score: [this.scores.blue, this.scores.red] })
@@ -1047,8 +1053,9 @@ function startBattle(charKey: string, net: { transport: NetTransport; role: NetR
     (scores) => {
       const mine = myTeam === 'blue' ? scores.blue : scores.red
       const theirs = myTeam === 'blue' ? scores.red : scores.blue
-      const win = mine > theirs
-      const draw = mine === theirs
+      const forfeit = !!battle?.oppForfeited // 相手がマッチ中に切断/退出=不戦勝(スコアに依らずWIN)
+      const win = forfeit || mine > theirs
+      const draw = !forfeit && mine === theirs
       const label = document.getElementById('result-label')!
       label.textContent = draw ? 'DRAW' : win ? 'WIN' : 'LOSE'
       label.className = draw ? 'draw' : win ? 'win' : 'lose'
@@ -1069,11 +1076,13 @@ function startBattle(charKey: string, net: { transport: NetTransport; role: NetR
       ]
         .map(([k, v]) => `<div class="rs-item"><span>${k}</span><b>${v}</b></div>`)
         .join('')
-      document.getElementById('result-sub')!.textContent = draw
-        ? '互角。次は盤面で上回れ。'
-        : win
-          ? '盤面とエイム、両方の勝利だ。'
-          : '盤面を立て直し、コアを制せ。'
+      document.getElementById('result-sub')!.textContent = forfeit
+        ? '相手が退出しました — あなたの不戦勝。'
+        : draw
+          ? '互角。次は盤面で上回れ。'
+          : win
+            ? '盤面とエイム、両方の勝利だ。'
+            : '盤面を立て直し、コアを制せ。'
       // オンライン対戦はP2P接続が試合後に切れるため、即時再戦はできない→再戦ボタンを「ロビーへ」に変える(オフラインは「再戦」のまま)
       document.getElementById('btn-rematch')!.textContent = lastWasOnline ? 'ロビーへ' : '再戦'
       showScreen('result')
@@ -1317,6 +1326,8 @@ document.getElementById('lobby-join')!.addEventListener('click', () => {
   connected.then(() => onNetConnected(transport, 'client'))
     .catch((e) => { lobbyCleanup(); lobbyShowReconnect(lobbyErrMsg(e, true)) }) // 合言葉ミス/相手不在/タイムアウト時もchoice再表示+スピナー停止
 })
+// 合言葉入力欄で Enter → 参加(全キーボードユーザーのコア動線。<form>でないため明示配線)
+lobbyEl.codeInput.addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); document.getElementById('lobby-join')!.dispatchEvent(new MouseEvent('click')) } })
 document.getElementById('lobby-copy')!.addEventListener('click', () => {
   const code = lobbyEl.code.textContent ?? ''
   if (code) navigator.clipboard?.writeText(code).then(() => { lobbyEl.msg.textContent = 'コピーしました！相手に伝えてください。' }).catch(() => {})
@@ -1702,6 +1713,20 @@ window.addEventListener('resize', () => {
     const hostFinishedAtSec = +((host as any).t).toFixed(2)
     host.dispose()
     return { ok: clientRecovered && hostRecovered, clientRecovered, hostRecovered, clientFinishedAtSec, hostFinishedAtSec }
+  },
+  // 相手切断=残存側の不戦勝(WIN確定・誤LOSE/DRAW防止)の検証(改善#10)。マッチ中にclientが退出→host側 onStateChange が
+  // closed を拾い oppForfeited=true+finish() し、結果がスコアに依らずWINになる(リーバー逃げ得防止)。
+  netForfeitTest() {
+    const noop = () => {}
+    const [h, c] = LoopbackTransport.pair(0)
+    const host = new BattleView({ charKey: 'renji', botLevel: 6, practice: false, mapKey: 'skyhaven' }, noop, { transport: h, role: 'host', oppCharKey: 'mimi' })
+    const client = new BattleView({ charKey: 'mimi', botLevel: 6, practice: false, mapKey: 'skyhaven' }, noop, { transport: c, role: 'client', oppCharKey: 'renji' })
+    for (let f = 0; f < 5; f++) { host.update(1 / 60); client.update(1 / 60) } // 接続確立(snapshot往復)
+    c.close() // client退出
+    for (let f = 0; f < 5; f++) { host.update(1 / 60); client.update(1 / 60) }
+    const hostForfeitWin = host.over === true && host.oppForfeited === true
+    host.dispose(); client.dispose()
+    return { ok: hostForfeitWin, hostOver: host.over, hostForfeited: host.oppForfeited }
   },
   // 非信頼host由来の異常shapeスナップショット耐性検証(第11/14監査): units/cores/score/spheres/reveal に
   // null要素/非配列/NaN を注入しても client が throw せず(描画フレームを落とさず)、健全フレームで正常復帰するか。
