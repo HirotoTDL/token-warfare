@@ -357,6 +357,7 @@ class BattleView implements View {
   private snapAcc = 0 // host: スナップショット送信間隔の累積
   private inSeq = 0 // client: 入力連番
   private lastSnap: Snapshot | null = null // client: 直近受信スナップ(未適用)
+  private netPeerActive = false // online: 相手から入力(host視点)/snapshot(client視点)を一度でも受信したか。開始後一定時間ゼロ=片側開始フリーズ→自動終了
   private lastOppHp = 99999 // client: 相手将の前回HP(被弾→ヒットマーカー判定用)
   private clientLastOppAlive = true // client: 相手将の前回生存(撃破バナー/SE/ヒットストップの立ち上がり検出用)
   private clientCores: { x: number; z: number; small: boolean }[] = [] // client: ミニマップ用コア(snapshot権威)
@@ -453,7 +454,7 @@ class BattleView implements View {
       this.puppets = new PuppetManager(this.world.scene)
       this.puppets.setLocalCommanderTeam('red')
       net!.transport.onMessage((ch, data: any) => {
-        if (ch === 'state') this.lastSnap = data as Snapshot
+        if (ch === 'state') { this.lastSnap = data as Snapshot; this.netPeerActive = true }
         else if (ch === 'event' && data && data.type === 'fire') {
           // ホストから来た発射(相手将/双方トークン)を視覚弾として再生(ダメージはホスト権威=snapshotのHPで反映)。
           // 非信頼peer境界なので座標/方向の有限性を検証(NaN/Infを通すと弾プールが永続汚染されWebGL描画が回復不能に壊れる)。
@@ -490,10 +491,16 @@ class BattleView implements View {
     // オンライン: 相手の切断/接続喪失でマッチがフリーズしないよう、検知して終了する(商業品質のロバスト性)
     if (this.net) {
       this.net.transport.onStateChange((s) => {
-        if ((s === 'closed' || s === 'failed') && !this.over) {
-          this.hud.killBanner('相手が切断しました', true)
-          this.hud.warn('⚠ 通信が切断されました — マッチ終了', 5)
-          this.finish()
+        if (s === 'closed' || s === 'failed') {
+          // 孤立Peer(ブローカーWS)を切断の瞬間に確実回収する。結果画面の後始末は close() を呼ぶが、
+          // close() は state==='closed' で即returnし peer.destroy() に到達しない=マッチ毎にPeer/WSがリークする。
+          // dispose() は冪等ガード無しで必ず peer/conn を破棄するので、ここで呼べば 'closed' 経路のリークを塞げる。
+          try { this.net?.transport.dispose?.() } catch { /* noop */ }
+          if (!this.over) {
+            this.hud.killBanner('相手が切断しました', true)
+            this.hud.warn('⚠ 通信が切断されました — マッチ終了', 5)
+            this.finish()
+          }
         }
       })
     }
@@ -800,6 +807,19 @@ class BattleView implements View {
     this.sky.update(this.t)
     this.arena.update(dt, this.t)
     if (paused && !this.net) return // 一時停止で凍結するのはオフラインのみ。オンラインはsim/ネットコードを進め続ける。
+
+    // 片側開始フリーズの自動回収: AFKタイムアウト境界(30s±1RTT)レース等で相手が対戦に入っていない場合、
+    // 相手からの入力(host視点=RemoteCommander.lastInputT)/スナップショット(client視点=netPeerActive)が一切来ない。
+    // 開始から一定時間ゼロなら相手不在と判断してマッチ終了する(本レースに限らずあらゆる片側開始/握手中切断を救済)。
+    if (this.net && !this.over && !this.netPeerActive) {
+      if (this.isHost && (this.bot as any)?.lastInputT > 0) this.netPeerActive = true // host: client入力を受信(clientは'state'受信でnetPeerActive)
+      if (!this.netPeerActive && this.t > 4) {
+        this.netPeerActive = true // 二重発火防止
+        this.hud.killBanner('対戦相手が参加できませんでした', true)
+        this.hud.warn('⚠ 相手が対戦に入りませんでした — マッチ終了', 5)
+        this.finish()
+      }
+    }
 
     // クライアントは権威simを持たない: 入力送信＋受信スナップショット適用(スコア/タイマー/相手puppet/自機補正)
     if (this.isClient) this.clientNetUpdate(dt)
@@ -1635,6 +1655,26 @@ window.addEventListener('resize', () => {
     r.ok = r.ok && r.disconnectEndsMatch
     host.dispose(); client.dispose()
     return r
+  },
+  // 片側開始フリーズの自動回収検証(第13監査 finding#3): 相手が対戦に入らない(入力/snapshotがゼロ)client/host が、
+  // 開始から一定時間(>4s)後に自動でマッチ終了(over=true)するか。AFKタイムアウト境界レース等の凍結ソロ対戦の救済を担保。
+  netSoloFreezeTest() {
+    const noop = () => {}
+    // client単独: host不在=snapshotが一切来ない→netPeerActiveが立たず watchdog が finish() する
+    const [, c] = LoopbackTransport.pair(0)
+    const client = new BattleView({ charKey: 'mimi', botLevel: 6, practice: false, mapKey: 'skyhaven' }, noop, { transport: c, role: 'client', oppCharKey: 'renji' })
+    for (let f = 0; f < 320 && !client.over; f++) client.update(1 / 60) // 320/60≈5.3s(>4s閾値)
+    const clientRecovered = client.over === true
+    const clientFinishedAtSec = +((client as any).t).toFixed(2)
+    client.dispose()
+    // host単独: client不在=入力が一切来ない(RemoteCommander.lastInputT が 0 のまま)→watchdog が finish()
+    const [h2] = LoopbackTransport.pair(0)
+    const host = new BattleView({ charKey: 'renji', botLevel: 6, practice: false, mapKey: 'skyhaven' }, noop, { transport: h2, role: 'host', oppCharKey: 'mimi' })
+    for (let f = 0; f < 320 && !host.over; f++) host.update(1 / 60)
+    const hostRecovered = host.over === true
+    const hostFinishedAtSec = +((host as any).t).toFixed(2)
+    host.dispose()
+    return { ok: clientRecovered && hostRecovered, clientRecovered, hostRecovered, clientFinishedAtSec, hostFinishedAtSec }
   },
   // PvP遅延/ジッタ耐性検証: 片道latencyMs+片側ジッタjitterMs(到着のバースト化=実DataChannelのhead-of-line)の
   // 決定的ループバックで host→client を回し、競技回線で ①例外/NaNが出ない ②相手将puppetが連続的に動く

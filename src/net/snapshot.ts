@@ -277,13 +277,17 @@ export class PuppetManager {
    * GLBを持つトークンが未ロードの間も一旦プロシージャルで描き、読めたら tryUpgrade でGLBへ差し替える。
    */
   private buildModelFor(u: UnitSnap): { group: THREE.Group; placeholder: boolean } {
-    const m = getModel(this.keyFor(u), u.team)
+    // wallpod は向き(o=alongX)が幾何に焼き込まれる(host=buildWallがw/dを入替)。GLBは固定authored向きしか持てず
+    // o を反映できないため、token_wallpod.glb を置いた瞬間に client puppet が壁を誤った向きで描き host権威collider
+    // と最大90度ズレる。wallpod は常にプロシージャルで描いて o を一貫適用する(tryUpgrade でも差し替えない)。
+    const m = u.kind === 'wallpod' ? null : getModel(this.keyFor(u), u.team)
     if (m) return { group: m, placeholder: false }
     return { group: buildProceduralUnit(u.kind, u.team, u.ck, u.o !== false), placeholder: true }
   }
 
   /** 代替表示中のpuppetを、実GLBが読み込めたら本物に差し替える(transform/可視/HPバーを引き継ぐ) */
   private tryUpgrade(p: Puppet) {
+    if (p.kind === 'wallpod') return // wallpod は向き(o)一貫のため常にプロシージャル固定(buildModelFor 参照)。GLBへ差し替えない
     const real = getModel(p.modelKey, p.team)
     if (!real) return // まだ読み込めていない→次のスナップショットで再試行
     const stealthMats = this.collectMats(real) // 新モデルの素材を収集(バー追加前)

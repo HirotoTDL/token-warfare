@@ -77,20 +77,26 @@ export class WebRtcTransport implements NetTransport {
       const timer = setTimeout(() => {
         if (!idIssued && t.state === 'connecting') { t.setState('failed'); t.cleanupPeer(); reject(new Error('timeout')) }
       }, timeoutMs)
-      peer.on('open', (id) => { idIssued = true; clearTimeout(timer); t.roomCode = id; resolve(id) }) // 部屋コード発行(待受開始)
+      // 再接続は上限回数＋指数バックオフ付き(broker恒久不達/id衝突での無制限WSチャーン・電池消耗を防止)。
+      // 待受中(connecting)に諦めたら部屋は参加者を受けられないので state='failed' でロビーへ失敗通知。
+      // 参加者確立(state='open')後は broker不要なので canRetry が false になり自然に止まる。
+      const rc = t.makeReconnector(peer, () => idIssued && t.state === 'connecting', () => { t.setState('failed'); t.cleanupPeer() })
+      peer.on('open', (id) => { idIssued = true; rc.onOpen(); clearTimeout(timer); t.roomCode = id; resolve(id) }) // 部屋コード発行(待受開始)
       // 参加者が来たら接続を確立。既に対戦相手が居る(conn確立済み)場合の2人目は拒否=送信先(this.conn)の乗っ取りを防ぐ。
       peer.on('connection', (conn) => {
         if (t.conn) { try { conn.close() } catch { /* noop */ } return }
         t.bind(conn)
       })
       peer.on('error', (e) => {
+        // id衝突(unavailable-id)は同idでの再接続が不可能なので即断念(待受中なら失敗通知)。
+        if ((e as { type?: string })?.type === 'unavailable-id') rc.markFatal()
         // 部屋コード発行前(待受確立前)の error のみ致命=即reject。発行後(参加者待ち中)の network/socket-* は
         // 一時的な回線ゆらぎなので peer を破棄せず部屋を生かす(従来は無条件 destroy で部屋がサイレント死していた)。
         if (!idIssued) { clearTimeout(timer); t.setState('failed'); t.cleanupPeer(); reject(e) }
       })
-      // 待受中にブローカーとのソケットが切れたら(peer は destroy されず disconnected になる)、同じidで再接続を試み
-      // 部屋コードを生かしたまま遅れて来る参加者を受け入れられるようにする。
-      peer.on('disconnected', () => { if (idIssued && t.state === 'connecting') { try { peer.reconnect() } catch { /* noop */ } } })
+      // 待受中にブローカーとのソケットが切れたら、同じidで(上限・バックオフ付きで)再接続を試み、
+      // 遅れて来る参加者を受け入れられるよう部屋コードを生かす。
+      peer.on('disconnected', rc.onDisconnected)
     })
     return { transport: t, ready }
   }
@@ -110,6 +116,9 @@ export class WebRtcTransport implements NetTransport {
         if (t.state !== 'open') { t.setState('failed'); t.cleanupPeer(); reject(new Error('timeout')) }
       }, timeoutMs)
       const done = () => { clearTimeout(timer); resolve() }
+      // 再接続は上限回数＋指数バックオフ付き(broker恒久不達/id衝突での無制限WSチャーン・電池消耗を防止)。
+      // DataChannel確立(state='open')後のみ試行し、諦めても DataChannel が生きていれば対戦は継続(沈黙)。
+      const rc = t.makeReconnector(peer, () => t.state === 'open', () => { /* DataChannel生存で対戦継続。broker再接続のみ断念 */ })
       // peer.connect は初回'open'の一度きり。良性のブローカーWS瞬断→peer.reconnect()→WS再オープンで
       // peer'open'が【再発火】するため、無ガードだと2本目のDataConnection(conn2)を張ってしまう。host側は
       // conn2を即closeする設計で、その遅延closeが bind()のclose時に this.conn=conn2 を null化+state='closed'
@@ -117,6 +126,7 @@ export class WebRtcTransport implements NetTransport {
       // 対称化した際の回帰)。ラッチで初回のみ接続し、reconnect後の'open'では既存connを維持する。
       let connectedOnce = false
       peer.on('open', () => {
+        rc.onOpen() // broker再接続成功で再試行カウンタをリセット
         if (connectedOnce) return // reconnect後の'open'再発火: 既存DataChannelを維持し二重connectを抑止
         connectedOnce = true
         const conn = peer.connect(code, { reliable: true })
@@ -125,11 +135,44 @@ export class WebRtcTransport implements NetTransport {
       // 接続確立前(open前)の error のみ致命=reject。open後(対戦中)のブローカー由来 network/socket-* は握りつぶす
       // (host() line 85 と対称化。これが無いとブローカー一時エラーでクライアント側だけマッチが強制終了していた)。
       // open後の本当の切断は DataChannel の conn.on('close'/'error')(bind)が検知する。
-      peer.on('error', (e) => { if (t.state !== 'open') { clearTimeout(timer); t.setState('failed'); t.cleanupPeer(); reject(e) } })
-      // open後にブローカーWSが切れても DataChannel を生かしたまま同idで再接続を試みる(host側と対称)。
-      peer.on('disconnected', () => { if (t.state === 'open') { try { peer.reconnect() } catch { /* noop */ } } })
+      peer.on('error', (e) => {
+        if ((e as { type?: string })?.type === 'unavailable-id') rc.markFatal() // id衝突は再接続不能=即断念
+        if (t.state !== 'open') { clearTimeout(timer); t.setState('failed'); t.cleanupPeer(); reject(e) }
+      })
+      // open後にブローカーWSが切れても DataChannel を生かしたまま同idで(上限・バックオフ付きで)再接続を試みる(host側と対称)。
+      peer.on('disconnected', rc.onDisconnected)
     })
     return { transport: t, connected }
+  }
+
+  /**
+   * ブローカーWS切断時の再接続を「上限回数＋指数バックオフ」でスケジュールするヘルパを作る。
+   * peerjs は WS が恒久不達/id衝突だと socket onclose→'disconnected' を延々と emit し、無ガードで
+   * peer.reconnect() を呼ぶと new WebSocket を無制限に張り続ける(スロットルされないWSチャーン=電池/CPU浪費)。
+   * - canRetry(): まだ再接続を試みるべき状況か(host=待受中, client=DataChannel生存中)。falseなら何もせず待機。
+   * - onGiveUp(): 上限到達/致命エラー時の後始末(host=部屋を失敗扱い, client=沈黙して対戦継続)。
+   * - onOpen(): broker再接続成功時に呼び、試行回数をリセットする。
+   * - markFatal(): 再接続不能(unavailable-id 等)で即断念する。
+   * peer が差し替わった(this.peer!==peer)/破棄後は自動的に停止する。
+   */
+  private makeReconnector(peer: Peer, canRetry: () => boolean, onGiveUp: () => void) {
+    let tries = 0
+    let timer: ReturnType<typeof setTimeout> | undefined
+    let gaveUp = false
+    const MAX = 6 // 500ms→…→8s で累計~23.5s 試行してから諦める
+    const onDisconnected = () => {
+      if (gaveUp || this.peer !== peer || !canRetry()) return
+      if (tries >= MAX) { gaveUp = true; clearTimeout(timer); onGiveUp(); return }
+      const delay = Math.min(500 * 2 ** tries, 8000)
+      tries++
+      clearTimeout(timer)
+      timer = setTimeout(() => { if (!gaveUp && this.peer === peer && canRetry()) { try { peer.reconnect() } catch { /* noop */ } } }, delay)
+    }
+    return {
+      onDisconnected,
+      onOpen: () => { tries = 0; clearTimeout(timer) },
+      markFatal: () => { if (gaveUp) return; gaveUp = true; clearTimeout(timer); if (canRetry()) onGiveUp() },
+    }
   }
 
   /** 失敗時にpeer/connを破棄(リーク・ゾンビ接続防止)。state は呼び出し側が設定済み。 */
@@ -166,12 +209,16 @@ export class WebRtcTransport implements NetTransport {
   }
 
   close(): void {
-    if (this.state === 'closed') return
+    // peer/conn の破棄は state に依らず常に行う(=孤立PeerJS Peer+ブローカーWSのリーク防止)。
+    // 旧実装は state==='closed' で即returnし peer.destroy() に到達せず、相手切断(state='closed')後に
+    // 結果画面から close() を呼んでも Peer/WS が回収されず対戦反復で累積リークしていた。
+    // setState('closed') の再発火(onStateChangeの二重起動)だけ冪等ガードする。
+    const already = this.state === 'closed'
     try { this.conn?.close() } catch { /* noop */ }
     try { this.peer?.destroy() } catch { /* noop */ }
     this.conn = null
     this.peer = null
-    this.setState('closed')
+    if (!already) this.setState('closed')
   }
 
   /** state に関わらず peer/conn を確実に破棄する(close() の 'closed' 冪等ガードを回避)。
