@@ -7,6 +7,11 @@ import { TOKENS, DecoyUnit, loadoutFor } from './tokens'
 import { buildMonsterCommander } from './models'
 import { getModel, animateGlbBody, animateSkeleton } from './modelLoader'
 
+// ジャンプ垂直物理(player.tsと同値)。ボットも段差/塔/障害物をジャンプで越えられるようにする。
+const BOT_GRAVITY = 20
+const BOT_FALL_MULT = 1.7
+const BOT_JUMP_VEL = 7.8
+
 function flatDist(a: THREE.Vector3, b: THREE.Vector3) {
   const dx = a.x - b.x
   const dz = a.z - b.z
@@ -120,6 +125,13 @@ export class BotCommander implements Unit {
   private dashDir = new THREE.Vector3()
   private strafeDir = 1
   private strafeT = 0
+  // 垂直移動(ジャンプ/重力/着地)。プレイヤー同様の物理をボットにも持たせ、段差・塔・障害物を飛び越えられるようにする。
+  private velY = 0
+  private onGround = true
+  private wantJump = false // このフレームでジャンプ踏み切りを要求(AIロジックが立てる)
+  private jumpCd = 0 // 連続ジャンプ抑制
+  private stuckT = 0 // 移動先へ進めていない時間(詰まり検出→ジャンプで越える)
+  private stuckRef = new THREE.Vector3()
   private regenDelay = 0
   private lastDamaged = 999
   private lastSawPlayer = 0
@@ -223,6 +235,16 @@ export class BotCommander implements Unit {
 
     this.combatUpdate(dt)
     this.moveUpdate(dt)
+    // 詰まり検出→ジャンプで越える: 移動先が遠いのに進めていない(障害物/段差/塔)なら踏み切る。
+    this.stuckT += dt
+    if (this.stuckT >= 0.3) {
+      const moved = flatDist(this.group.position, this.stuckRef)
+      const farTarget = this.moveTarget != null && flatDist(this.moveTarget, this.group.position) > 2
+      if (this.onGround && farTarget && moved < 0.22) this.wantJump = true
+      this.stuckRef.copy(this.group.position)
+      this.stuckT = 0
+    }
+    this.verticalUpdate(dt) // ジャンプ/重力/着地(段差・塔・障害物越え)。moveUpdate(水平)の後に縦を解く。
     this.deployUpdate()
     this.skillUpdate()
 
@@ -625,8 +647,9 @@ export class BotCommander implements Unit {
     }
   }
 
-  private bobWalk(speed: number) {
-    this.group.position.y = Math.abs(Math.sin(this.walkT * speed * 1.8)) * 0.06
+  private bobWalk(_speed: number) {
+    // y(高さ)は verticalUpdate の物理が一元管理する。歩行の上下バウンスをここで足すと接地判定が
+    // フリッカーしジャンプ物理が壊れるため、yは触らない(歩行の見た目は脚のスケルタルアニメで表現)。
   }
 
   private animPrev: THREE.Vector3 | null = null
@@ -692,6 +715,30 @@ export class BotCommander implements Unit {
         }
       }
     }
+  }
+
+  /** 垂直物理: 重力・ジャンプ・地面/コライダー上面への着地(プレイヤー同型)。collide()は p.y>上面 でコライダーを無視するので、
+   *  ジャンプで足元がコライダー上面を越えれば横移動で乗り、落下で上面に着地する=塔/段差を登れる。 */
+  private verticalUpdate(dt: number) {
+    const p = this.group.position
+    this.jumpCd = Math.max(0, this.jumpCd - dt)
+    if (this.wantJump && this.onGround && this.jumpCd <= 0) {
+      this.velY = BOT_JUMP_VEL; this.onGround = false; this.jumpCd = 0.45
+    }
+    this.wantJump = false
+    let g = BOT_GRAVITY; if (this.velY < 0) g *= BOT_FALL_MULT
+    this.velY -= g * dt
+    const prevY = p.y
+    p.y += this.velY * dt
+    // 着地面: 地面0 + 足元(x,z)がフットプリント内のコライダー上面のうち、直前フレームで上にいた最高面
+    let landY = 0
+    for (const c of this.world.colliders) {
+      if (p.x >= c.min.x - this.radius && p.x <= c.max.x + this.radius &&
+          p.z >= c.min.z - this.radius && p.z <= c.max.z + this.radius &&
+          prevY >= c.max.y - 0.1 && c.max.y > landY) landY = c.max.y
+    }
+    if (this.velY <= 0 && p.y <= landY) { p.y = landY; this.velY = 0; this.onGround = true }
+    else this.onGround = (p.y <= landY + 0.001)
   }
 
   private deployUpdate() {
