@@ -28,13 +28,14 @@ export interface Snapshot {
   t: number // ホスト時刻(補間/順序用)
   units: UnitSnap[]
   spheres: number[] // [center, blueBase, redBase] の charge[-1,1]
+  cont?: boolean[] // [center, blueBase, redBase] の係争中フラグ(ホスト権威。クライアントは自前導出できないため送る)
   score: [number, number] // [blue, red]
   timer: number
   sd?: boolean // サドンデス中か(クライアントのフェーズ告知/HUD表示用。ホスト権威)
 }
 
 /** ホストのworld/objectivesから現在のスナップショットを作る(権威側で毎送信フレーム呼ぶ) */
-export function encodeSnapshot(units: Unit[], spheres: number[], score: [number, number], timer: number, t: number, sd = false): Snapshot {
+export function encodeSnapshot(units: Unit[], spheres: number[], score: [number, number], timer: number, t: number, sd = false, cont: boolean[] = []): Snapshot {
   const us: UnitSnap[] = []
   for (const u of units) {
     if (!u.alive && u.kind === 'commander') {
@@ -61,7 +62,7 @@ export function encodeSnapshot(units: Unit[], spheres: number[], score: [number,
       o: u.kind === 'wallpod' ? (u as any).alongX : undefined,
     })
   }
-  return { t, units: us, spheres, score, timer, sd: sd || undefined }
+  return { t, units: us, spheres, cont: cont.some((c) => c) ? cont : undefined, score, timer, sd: sd || undefined }
 }
 
 interface Sample {

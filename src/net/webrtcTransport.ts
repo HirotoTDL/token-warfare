@@ -136,8 +136,11 @@ export class WebRtcTransport implements NetTransport {
     this.conn = conn
     conn.on('open', () => { this.setState('open'); onOpen?.() })
     conn.on('data', (d: any) => { if (d && typeof d === 'object' && d.ch) this.msgCb?.(d.ch as NetChannel, d.data) })
-    conn.on('close', () => this.setState('closed'))
-    conn.on('error', () => this.setState('failed'))
+    // close/error時は自分が現役connのときだけスロットを解放する。これが無いと、open前に死んだ初回接続のconnが
+    // this.connに残り、host()の 'connection' ガード(if t.conn)が以降の正規参加者を全拒否=部屋デッドロックになる。
+    // 同一性チェックで、解放後に届く遅延イベントが後続の別connを誤ってnull化することも防ぐ。
+    conn.on('close', () => { if (this.conn === conn) this.conn = null; this.setState('closed') })
+    conn.on('error', () => { if (this.conn === conn) this.conn = null; this.setState('failed') })
   }
 
   send(ch: NetChannel, data: unknown): void {

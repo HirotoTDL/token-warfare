@@ -74,6 +74,7 @@ export class RemoteCommander implements Unit {
   private burstLeft = 0 // バースト武器(リコ等)の残発数。PlayerCommanderと同じ3点バースト挙動を再現
   private burstT = 0
   private pendingFire = false // セミオート発砲エッジ(クリック)の蓄積。update毎に1回だけ消費(ローカルのendFrameクリアと対称)
+  private lastInputT = 0 // 最後に入力フレームを受理した実時刻(performance.now)。鮮度判定用(停滞中の暴走防止)
   private lastFireT = 0
   private coyote = 0
   private jumpHeld = false
@@ -98,9 +99,23 @@ export class RemoteCommander implements Unit {
     this.group.position.copy(this.pos)
     this.muzzle = (this.group.userData.muzzle as THREE.Object3D) ?? null
     this.group.traverse((o) => {
-      if ((o as THREE.Mesh).isMesh) this.hitMeshes.push(o as THREE.Mesh)
+      const mesh = o as THREE.Mesh
+      if (!mesh.isMesh) return
+      this.hitMeshes.push(mesh)
+      // ステルス半透明化用に素材を収集(BotCommander/puppetと同様)。cloak/decoy中はホスト画面でも薄く表示する。
+      const mats = Array.isArray(mesh.material) ? mesh.material : (mesh.material ? [mesh.material] : [])
+      for (const m of mats) { m.transparent = true; this.stealthMats.push({ m, opacity: (m as any).opacity ?? 1 }) }
     })
     this.animPrev.copy(this.pos)
+  }
+
+  private stealthMats: { m: THREE.Material; opacity: number }[] = []
+  /** cloak/decoy中はモデルを半透明(0.13)化、解除で元の不透明度へ。ホスト画面で赤将のステルスを可視化(BotCommander/puppetと対称) */
+  private setStealthVisual(on: boolean) {
+    for (const s of this.stealthMats) {
+      const want = on ? 0.13 : s.opacity
+      if (s.m.opacity !== want) { s.m.opacity = want; s.m.needsUpdate = true }
+    }
   }
 
   /** 受信した入力を反映(最新フレームを採用。Phase1でジッタバッファ/補間を追加)。
@@ -117,7 +132,11 @@ export class RemoteCommander implements Unit {
     // セミオート発砲エッジは別フラグへOR蓄積する。クライアントFPS>ホストFPSや回線ジッタで firePressed=true の直後に
     // firePressed未設定フレームが来て this.input を上書きしてもエッジを取りこぼさない(コアレッシング耐性)。
     if (ni.firePressed) this.pendingFire = true
+    // 非信頼peer対策: triggers は許可語のみ(現状 'skill')に限定。未知/偽装トリガ('dash'等)を sim に到達させない。
+    if (Array.isArray(ni.triggers)) ni.triggers = ni.triggers.filter((t) => t === 'skill')
+    else ni.triggers = undefined
     this.input = ni
+    this.lastInputT = (typeof performance !== 'undefined' ? performance.now() : Date.now())
   }
 
   /** トランスポートの 'input' チャンネルを購読してリモート入力を受け取る */
@@ -145,6 +164,7 @@ export class RemoteCommander implements Unit {
       case 'cloak':
       case 'decoy':
         this.stealthed = true
+        this.setStealthVisual(true) // ホスト画面でも赤将を半透明化(cloak/decoyを可視化)
         if (s.key === 'decoy') {
           const decoy = new DecoyUnit(this.world, this.combat, this.sfx, this.team, this.pos.clone(), this.char, this.yaw + Math.PI)
           this.world.addUnit(decoy)
@@ -244,6 +264,7 @@ export class RemoteCommander implements Unit {
     this.dashT = 0
     this.regenDelay = 0 // 復帰時は回復待ちを残さない(PlayerCommander.respawnと対称)
     this.pendingFire = false // 死亡前に溜まったクリックで復帰直後に暴発しない
+    this.setStealthVisual(false) // 復帰時は不透明へ戻す
     this.group.visible = true
     this.group.position.copy(this.pos)
   }
@@ -262,7 +283,7 @@ export class RemoteCommander implements Unit {
     // スキル持続の終了処理(cloak/decoyのステルス解除)
     if (this.skillActiveT > 0) {
       this.skillActiveT -= dt
-      if (this.skillActiveT <= 0 && (this.skillKey === 'cloak' || this.skillKey === 'decoy')) this.stealthed = false
+      if (this.skillActiveT <= 0 && (this.skillKey === 'cloak' || this.skillKey === 'decoy')) { this.stealthed = false; this.setStealthVisual(false) }
     }
 
     const ni = this.input
@@ -270,11 +291,15 @@ export class RemoteCommander implements Unit {
       this.yaw = ni.yaw
       this.pitch = Math.max(-1.45, Math.min(1.45, ni.pitch))
     }
-    const mx = ni ? ni.mx : 0
-    const mz = ni ? ni.mz : 0
-    const wantFire = !!ni && ni.fire
-    const wantJump = !!ni && ni.jump
-    const wantCharge = !!ni && ni.charge
+    // 入力鮮度: 一定時間(700ms)新フレームが来ない=パケット停滞中は、最後の入力で移動/発砲し続けず中立入力に倒す
+    // (視点yaw/pitchは保持してその場で停止)。完全切断は transport の onStateChange→finish が別途検知する。
+    const now = (typeof performance !== 'undefined' ? performance.now() : Date.now())
+    const stale = !ni || (now - this.lastInputT) > 700
+    const mx = (ni && !stale) ? ni.mx : 0
+    const mz = (ni && !stale) ? ni.mz : 0
+    const wantFire = !!ni && !stale && ni.fire
+    const wantJump = !!ni && !stale && ni.jump
+    const wantCharge = !!ni && !stale && ni.charge
     const charger = this.weapon.charger
 
     // --- チャージ / エネルギー(player.ts と同一モデル) ---
@@ -324,11 +349,9 @@ export class RemoteCommander implements Unit {
     else if (this.vel.y > 0 && !wantJump) g *= LOWJUMP_MULT
     this.vel.y -= g * dt
 
-    // ダッシュ(trigger 'dash' で発動。skill本体は Phase1)
-    if (ni?.triggers?.includes('dash') && this.dashT <= 0) {
-      this.dashT = 0.22
-      this.dashDir.copy(moving ? wish : fwd)
-    }
+    // ダッシュの始動は権威の activateSkill('dash') のみ(skillCd 12s でゲート済)。
+    // 旧: 無検証の triggers:['dash'] で dashT を立てる分岐があったが、クールダウン/スキル種別を一切見ず
+    // 改造クライアントが毎フレーム送れば 24m/s 連続ダッシュし放題の権威ホールだったため撤去。dashT>0 の移動だけ残す。
     if (this.dashT > 0) {
       this.dashT -= dt
       this.vel.x = this.dashDir.x * 24
@@ -380,7 +403,7 @@ export class RemoteCommander implements Unit {
     const w = this.weapon
     if (this.invulnT > INVULN_ON_FIRE) this.invulnT = INVULN_ON_FIRE // 発砲でスポーン無敵を解除(無敵撃ち返し封じ)
     // 発砲でステルス解除(cloak/decoyの「発砲で解除」契約。これが無いとホスト権威の索敵抑制が残り撃ち放題になる)
-    if (this.stealthed) { this.stealthed = false; this.skillActiveT = 0 }
+    if (this.stealthed) { this.stealthed = false; this.skillActiveT = 0; this.setStealthVisual(false) }
     // fireCd/energy消費・連射処理は呼び出し側(update発火ゲート/バーストループ)が管理する=player.tsと同一。
     // 視点方向(yaw/pitch)から弾道。射撃元は目の高さから(3人称ボディ)。
     const cp = Math.cos(this.pitch)
@@ -406,7 +429,7 @@ export class RemoteCommander implements Unit {
     const w = this.weapon
     const p = chargeShotParams(cd, frac)
     if (this.invulnT > INVULN_ON_FIRE) this.invulnT = INVULN_ON_FIRE
-    if (this.stealthed) this.stealthed = false
+    if (this.stealthed) { this.stealthed = false; this.setStealthVisual(false) }
     const cp = Math.cos(this.pitch)
     const dir = new THREE.Vector3(-Math.sin(this.yaw) * cp, Math.sin(this.pitch), -Math.cos(this.yaw) * cp)
     const spread = w.spread * (moving ? 1.6 : 1) * (1.2 - p.frac * 0.4)

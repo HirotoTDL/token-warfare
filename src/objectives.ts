@@ -81,8 +81,11 @@ export class Sphere {
     else this.hitRed = 0
   }
 
-  /** 両軍から直近に撃たれている=係争中(占領が拮抗。相殺で動きが止まる) */
+  /** 両軍から直近に撃たれている=係争中(占領が拮抗。相殺で動きが止まる)。
+   *  クライアントは hitBlue/hitRed を持てない(占領simを走らせない)ため、snapshotで受けた権威値で上書きする。 */
+  snapContested: boolean | null = null // null=自前導出(host/オフライン)、非null=snapshot権威(client)
   contested(): boolean {
+    if (this.snapContested !== null) return this.snapContested
     return this.hitBlue < CONTEST_WINDOW && this.hitRed < CONTEST_WINDOW
   }
 

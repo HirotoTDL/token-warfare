@@ -653,6 +653,7 @@ class BattleView implements View {
       this.timer,
       this.t,
       this.suddenDeath,
+      [o.center.contested(), o.base.blue.contested(), o.base.red.contested()], // 係争状態(クライアントは自前導出不可)
     )
     this.net.transport.send('state', snap)
   }
@@ -691,9 +692,14 @@ class BattleView implements View {
       this.hud.warn(`占領カウント ${snap.score[0]} - ${snap.score[1]}`, 1)
     }
     this.clientLastScoreBlue = snap.score[0]; this.clientLastScoreRed = snap.score[1]
-    // スフィアの見た目をchargeで反映(視覚のみ)
+    // スフィアの見た目をchargeで反映(視覚のみ)。係争状態はクライアントで自前導出できない(占領sim未実行で
+    // hitBlue/hitRedが更新されない)ため、snapshotの権威値で snapContested を上書きしてから視覚更新する。
     const o = this.objectives
     o.center.charge = snap.spheres[0]; o.base.blue.charge = snap.spheres[1]; o.base.red.charge = snap.spheres[2]
+    const cont = snap.cont
+    o.center.snapContested = cont ? !!cont[0] : false
+    o.base.blue.snapContested = cont ? !!cont[1] : false
+    o.base.red.snapContested = cont ? !!cont[2] : false
     for (const s of o.spheres) s.update(_dt)
     // スフィア確保/被奪取のフィードバックもホストの!isClientブロック限定だった。chargeから所有権遷移を自前検出し、
     // 赤(自分)視点でバナー/SEを鳴らす(redBase=自陣, blueBase=敵陣 と反転。host視点の流用は禁物)。
@@ -719,8 +725,15 @@ class BattleView implements View {
     }
     const me = snap.units.find((u) => u.kind === 'commander' && u.team === 'red')
     if (me) {
-      // 被弾フィードバック: HPが下がっていたら被ダメ演出(画面フラッシュ/シェイク)を起動(snapshot直書きだと無音だった)
-      if (me.hp < this.player.hp) { const d = this.player.hp - me.hp; this.player.onDamaged?.(d); this.stats.dmgTaken += d }
+      // 被弾フィードバック: HPが下がっていたら被ダメ演出(画面フラッシュ/シェイク)を起動(snapshot直書きだと無音だった)。
+      // 閾値0.5: ローカルの自動回復(player.ts)が次snapshotまでに hp を僅かに climb させ me.hp(整数)を上回ると、
+      // それを誤って被弾と判定し被弾後6秒間ビネットが点滅+dmgTaken水増ししていた→0.5未満差は無視。
+      // さらに被弾時はローカルregenDelayを権威と同じ6sに張って、回復先行(phantom)を根絶する。
+      if (me.hp < this.player.hp - 0.5) {
+        const d = this.player.hp - me.hp
+        this.player.onDamaged?.(d); this.stats.dmgTaken += d
+        this.player.regenDelay = 6
+      }
       this.player.hp = me.hp
       this.player.maxHp = me.mhp
       if (me.tp !== undefined) this.player.tp = me.tp // TPはホスト権威(配備可否・HUD表示を一致させる)
