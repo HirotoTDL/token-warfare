@@ -1,3 +1,5 @@
+import { keybinds, type KeyAction } from './settings'
+
 export class Input {
   keys = new Set<string>()
   pressed = new Set<string>()
@@ -80,5 +82,19 @@ export class Input {
       return true
     }
     return false
+  }
+
+  // ===== アクション単位の入力(キーバインド解決。リバインドに追従) =====
+  /** そのアクションのキーが押されているか(押しっぱなし判定: 移動/チャージ/ジャンプ等) */
+  down(action: KeyAction): boolean {
+    return this.keys.has(keybinds[action])
+  }
+  /** そのアクションがこのフレームで押されたか(1度だけtrue・消費する: スキル/配備) */
+  hit(action: KeyAction): boolean {
+    return this.consume(keybinds[action])
+  }
+  /** そのアクションがこのフレームで押されたか(消費しない: ネット入力サンプル用) */
+  was(action: KeyAction): boolean {
+    return this.pressed.has(keybinds[action])
   }
 }

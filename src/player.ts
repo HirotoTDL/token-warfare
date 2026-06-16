@@ -12,7 +12,7 @@ import {
 import { TOKENS, DecoyUnit, loadoutFor } from './tokens'
 import { buildViewmodel } from './models'
 import { getScenery } from './modelLoader'
-import { settings } from './settings'
+import { settings, keybinds, keyLabel, type KeyAction } from './settings'
 
 const GRAVITY = 20 // 上昇時の基本重力
 const FALL_MULT = 1.7 // 落下時は重力を強めて締まったアーチに(浮わつき防止)
@@ -207,7 +207,7 @@ export class PlayerCommander implements Unit {
     this.pitch = Math.max(-1.45, Math.min(1.45, this.pitch))
 
     // --- エネルギーチャージ(Rホールド。無防備) ---
-    this.charging = input.keys.has('KeyR') && this.energy < ENERGY_MAX - 0.5
+    this.charging = input.down('charge') && this.energy < ENERGY_MAX - 0.5
     if (this.charging) {
       this.energy = Math.min(ENERGY_MAX, this.energy + ENERGY_CHARGE_RATE * dt)
     } else if (this.lastFireT > ENERGY_PASSIVE_DELAY) {
@@ -219,13 +219,13 @@ export class PlayerCommander implements Unit {
     const fwd = this.flatForward()
     const right = new THREE.Vector3(Math.cos(this.yaw), 0, -Math.sin(this.yaw))
     const wish = new THREE.Vector3()
-    if (input.keys.has('KeyW')) wish.add(fwd)
-    if (input.keys.has('KeyS')) wish.sub(fwd)
-    if (input.keys.has('KeyD')) wish.add(right)
-    if (input.keys.has('KeyA')) wish.sub(right)
+    if (input.down('forward')) wish.add(fwd)
+    if (input.down('back')) wish.sub(fwd)
+    if (input.down('right')) wish.add(right)
+    if (input.down('left')) wish.sub(right)
     const moving = wish.lengthSq() > 0
     if (moving) wish.normalize()
-    const sprinting = input.keys.has('ShiftLeft') && input.keys.has('KeyW') && !zoomed && !this.charging
+    const sprinting = input.down('sprint') && input.down('forward') && !zoomed && !this.charging
     let speed = sprinting ? 8.5 : 6
     if (zoomed) speed *= 0.55
     if (this.charging) speed *= CHARGE_SPEED_MUL
@@ -237,7 +237,7 @@ export class PlayerCommander implements Unit {
 
     // --- ジャンプ(コヨーテタイム + 可変ジャンプ高 + 非対称重力) ---
     this.coyote = this.onGround ? COYOTE_TIME : Math.max(0, this.coyote - dt)
-    const spaceDown = input.keys.has('Space')
+    const spaceDown = input.down('jump')
     // 接地中/猶予中に押下した瞬間だけ踏み切る(上昇中の連続発火は防ぐ)
     if (spaceDown && !this.jumpHeld && this.coyote > 0 && this.vel.y <= 0.1) {
       this.vel.y = JUMP_VEL
@@ -269,7 +269,7 @@ export class PlayerCommander implements Unit {
         this.stealthed = false
       }
     }
-    if (input.consume('KeyE') && this.skillCd <= 0) this.activateSkill(moving ? wish : fwd)
+    if (input.hit('skill') && this.skillCd <= 0) this.activateSkill(moving ? wish : fwd)
 
     // --- カメラ更新 ---
     const stepRate = sprinting ? 13 : 10
@@ -347,14 +347,14 @@ export class PlayerCommander implements Unit {
         }
       } else if (!this.energyWarned) {
         this.energyWarned = true
-        this.onMessage?.('エネルギー不足 — R長押しでチャージ')
+        this.onMessage?.(`エネルギー不足 — ${keyLabel(keybinds.charge)}長押しでチャージ`)
         this.sfx.denied()
       }
     }
 
     // --- 配備 ---
     for (let i = 0; i < 4; i++) {
-      if (input.consume(`Digit${i + 1}`)) this.tryDeploy(i)
+      if (input.hit(`deploy${i + 1}` as KeyAction)) this.tryDeploy(i)
     }
 
     // --- 回復・TP ---

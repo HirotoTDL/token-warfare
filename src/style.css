@@ -79,6 +79,7 @@ body {
 .controls-card table { border-collapse: collapse; font-size: 13px; }
 .controls-card td { padding: 3px 14px 3px 0; color: #d8d8f0; }
 .controls-card td:first-child { color: #9bb4e8; font-weight: bold; }
+.controls-card td.ctl-note { color: #7d8aa0; font-weight: 400; font-size: 11px; padding-top: 7px; }
 .version { font-size: 12px; color: #8a7cab; letter-spacing: 0.2em; }
 
 /* ===== モード選択 ===== */
@@ -420,6 +421,25 @@ body {
 .set-row span { width: 86px; }
 .set-row b { width: 46px; text-align: right; color: #8fd8ff; font-size: 12px; }
 .set-row input[type="range"] { flex: 1; accent-color: var(--pink); cursor: pointer; }
+
+/* キーバインド設定 */
+.keybind-section { margin-top: 14px; border-top: 1px solid var(--panel-line); padding-top: 12px; }
+.keybind-section h4 { font-size: 12px; letter-spacing: 0.2em; color: #9cc2e8; margin-bottom: 9px; }
+.keybind-section h4 small { font-weight: 400; letter-spacing: 0; color: #7d8aa0; font-size: 10px; }
+.keybind-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 5px 14px; }
+.keybind-row { display: flex; align-items: center; justify-content: space-between; gap: 8px; font-size: 12px; color: #d8e2f2; }
+.keybind-btn {
+  min-width: 64px; padding: 4px 8px; font: inherit; font-size: 12px; cursor: pointer;
+  background: rgba(20, 34, 56, 0.7); color: #8fd8ff; border: 1px solid var(--panel-line);
+  border-radius: 5px; text-align: center; transition: border-color 0.12s, background 0.12s;
+}
+.keybind-btn:hover { border-color: var(--pink); }
+.keybind-btn:focus-visible { outline: 1px solid var(--pink); outline-offset: 1px; }
+.keybind-reset {
+  margin-top: 10px; padding: 5px 12px; font: inherit; font-size: 11px; cursor: pointer;
+  background: transparent; color: #9cc2e8; border: 1px solid var(--panel-line); border-radius: 5px;
+}
+.keybind-reset:hover { border-color: var(--pink); color: #fff; }
 
 .resume-inner { display: flex; flex-direction: column; align-items: center; gap: 20px; }
 

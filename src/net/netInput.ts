@@ -21,12 +21,12 @@ export interface NetInput {
 export function sampleNetInput(input: Input, yaw: number, pitch: number, seq: number): NetInput {
   let mx = 0
   let mz = 0
-  if (input.keys.has('KeyW')) mz += 1
-  if (input.keys.has('KeyS')) mz -= 1
-  if (input.keys.has('KeyD')) mx += 1
-  if (input.keys.has('KeyA')) mx -= 1
+  if (input.down('forward')) mz += 1
+  if (input.down('back')) mz -= 1
+  if (input.down('right')) mx += 1
+  if (input.down('left')) mx -= 1
   const triggers: string[] = []
-  if (input.pressed.has('KeyE')) triggers.push('skill')
+  if (input.was('skill')) triggers.push('skill')
   return {
     seq,
     mx,
@@ -34,8 +34,8 @@ export function sampleNetInput(input: Input, yaw: number, pitch: number, seq: nu
     yaw,
     pitch,
     fire: input.mouseDown,
-    charge: input.keys.has('KeyR'),
-    jump: input.keys.has('Space'),
+    charge: input.down('charge'),
+    jump: input.down('jump'),
     zoom: input.mouseRight,
     triggers: triggers.length ? triggers : undefined,
   }

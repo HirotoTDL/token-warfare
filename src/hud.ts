@@ -1,6 +1,7 @@
 import type { CharacterDef } from './types'
 import type { TokenDef } from './tokens'
 import { Minimap } from './minimap'
+import { keybinds, keyLabel } from './settings'
 
 export interface HudState {
   hp: number
@@ -148,7 +149,7 @@ export class HUD {
     this.els['h-en-fill'].style.width = `${s.energy}%`
     this.els['h-en-fill'].classList.toggle('charging', s.charging)
     this.els['h-en-fill'].classList.toggle('low', s.energy < 25 && !s.charging)
-    this.els['h-en-state'].textContent = s.charging ? 'チャージ中…' : s.energy < 25 ? 'R長押しでチャージ' : ''
+    this.els['h-en-state'].textContent = s.charging ? 'チャージ中…' : s.energy < 25 ? `${keyLabel(keybinds.charge)}長押しでチャージ` : ''
 
     this.els['h-tp-fill'].style.width = `${(s.tp / s.tpMax) * 100}%`
     this.els['h-tp'].textContent = `${Math.floor(s.tp)}`
