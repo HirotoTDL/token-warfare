@@ -1,5 +1,6 @@
 import * as THREE from 'three'
 import type { Team, Unit } from '../types'
+import type { World } from '../world'
 import { getModel } from '../modelLoader'
 import { buildProceduralUnit } from '../models'
 
@@ -22,6 +23,7 @@ export interface UnitSnap {
   st?: boolean // stealthed
   tp?: number // 将のTP(クライアントの自機TP HUDを権威化)
   o?: boolean // wallpodの向き(x軸沿いに伸びるか=alongX)。クライアントが壁を正しい向きで組むために送る
+  sld?: boolean // wallpodのコライダーが有効(deploy完了=射線/移動を塞ぐ)か。clientが同タイミングで予測用コライダーを登録するため送る
 }
 
 export interface Snapshot {
@@ -62,6 +64,7 @@ export function encodeSnapshot(units: Unit[], spheres: number[], score: [number,
       st: u.stealthed || undefined,
       tp: u.isCommander ? Math.round((u as any).tp ?? 0) : undefined,
       o: u.kind === 'wallpod' ? (u as any).alongX : undefined,
+      sld: u.kind === 'wallpod' && (u as any).deployed ? true : undefined, // deploy完了でコライダー有効。clientの予測コライダー登録タイミングを揃える
     })
   }
   return { t, units: us, spheres, cont: cont.some((c) => c) ? cont : undefined, score, timer, sd: sd || undefined,
@@ -91,6 +94,7 @@ interface Puppet {
   team: Team // 差し替え時に getModel へ渡す陣営
   kind: string // HPバー再生成用
   placeholder: boolean // 実GLB未ロードで代替(箱)を出しているか。trueの間は実モデルが読めたら差し替える
+  collider?: { min: THREE.Vector3; max: THREE.Vector3 } // client予測用にworldへ登録した壁(wallpod)コライダー。削除時に同一参照でworldから外す
 }
 
 const STEALTH_OPACITY = 0.13 // ステルス時のpuppet不透明度(BotCommander.setStealthVisualと同値)
@@ -108,8 +112,8 @@ export class PuppetManager {
   private clock = 0 // クライアント補間用クロック(update(dt)で進む)
   private readonly interpDelay = 0.1 // render-behind量(s)。受信間より大きく取りジッタ/欠落を吸収して滑らかに描く
 
-  constructor(scene: THREE.Scene) {
-    scene.add(this.group)
+  constructor(private world: World) {
+    world.scene.add(this.group)
   }
 
   /** 自機(クライアント本人)の陣営。その将はローカル一人称で描くのでpuppetにしない。 */
@@ -124,8 +128,11 @@ export class PuppetManager {
   /** スナップショット受信時: puppetの目標transformを更新し、居なくなったidは削除 */
   ingest(snap: Snapshot) {
     if (!snap || !Array.isArray(snap.units)) return // 不正スナップは丸ごと破棄
+    // 非信頼peer(host)由来: 配列長を正規最大(各maxActive合計~20/陣営+将+デコイで64未満)で頭打ちにする。
+    // 悪意hostが units を1万件詰めると1フレームで大量THREEモデルを同期構築しclientがフリーズ/OOMする(描画DoS)→上限でクランプ。
+    const units = snap.units.length > 64 ? snap.units.slice(0, 64) : snap.units
     const present = new Set<number>()
-    for (const u of snap.units) {
+    for (const u of units) {
       if (!u || typeof u !== 'object') continue // 非信頼peer由来: null/非オブジェクト要素は捨てる(isLocal/有限性検証の前にshapeを担保)
       if (this.isLocal(u)) continue
       // 非信頼peer(host)由来の座標を検証: NaN/Infをpuppet行列に入れるとThREEのフラスタムカリングが壊れ画面が凍結する。
@@ -164,10 +171,19 @@ export class PuppetManager {
       p.st = !!u.st
       p.alive = u.alive
       p.group.visible = u.alive
+      // client自機予測用: wallpodがsolid(deploy完了)になったら同一AABBコライダーをworldへ登録する。これが無いと
+      // client予測は壁を貫通しhost権威(壁で停止)と乖離→壁際でゴム/瞬間移動する(本ゲームの盤面制圧中核で頻発)。
+      if (u.kind === 'wallpod' && u.sld && !p.collider) {
+        const alongX = u.o !== false
+        const w = alongX ? 3 : 0.42, dd = alongX ? 0.42 : 3
+        p.collider = { min: new THREE.Vector3(u.x - w / 2, 0, u.z - dd / 2), max: new THREE.Vector3(u.x + w / 2, 2.2, u.z + dd / 2) }
+        this.world.addCollider(p.collider) // tokens.ts WallPodUnit と同一式。puppet削除時に同一参照でremove
+      }
     }
     // スナップに居ないpuppet(撃破/退場)は削除
     for (const [id, p] of this.puppets) {
       if (!present.has(id)) {
+        if (p.collider) this.world.removeCollider(p.collider) // 壁破壊→client予測コライダーも除去(残すと見えない壁になる)
         this.group.remove(p.group)
         this.puppets.delete(id)
       }
@@ -308,7 +324,7 @@ export class PuppetManager {
   }
 
   dispose() {
-    for (const p of this.puppets.values()) this.group.remove(p.group)
+    for (const p of this.puppets.values()) { if (p.collider) this.world.removeCollider(p.collider); this.group.remove(p.group) }
     this.puppets.clear()
     this.group.parent?.remove(this.group)
   }

@@ -451,7 +451,7 @@ class BattleView implements View {
       this.player.countActiveFn = (t, k) => this.puppets ? this.puppets.countActive(t, k) : 0
       // スキルもホスト権威。効果はsnapshotで反映(ステルス等)。ローカルはcd/演出のみ(HUD維持)。
       this.player.onSkill = () => { net!.transport.send('event', { type: 'skill' }); return true }
-      this.puppets = new PuppetManager(this.world.scene)
+      this.puppets = new PuppetManager(this.world)
       this.puppets.setLocalCommanderTeam('red')
       net!.transport.onMessage((ch, data: any) => {
         if (ch === 'state') { this.lastSnap = data as Snapshot; this.netPeerActive = true }
@@ -461,10 +461,16 @@ class BattleView implements View {
           const fin = (v: any) => typeof v === 'number' && Number.isFinite(v)
           const dirOk = fin(data.dx) && fin(data.dy) && fin(data.dz) && (data.dx * data.dx + data.dy * data.dy + data.dz * data.dz) > 1e-8
           if (fin(data.ox) && fin(data.oy) && fin(data.oz) && dirOk && (data.sp === undefined || fin(data.sp))) {
+            // 非信頼host由来: 有限でも値域は無検証だった→悪意hostが radius/size 巨大値で全画面ホワイトアウト、
+            // 毎発別colでmatCache無制限増殖(緩慢リーク)を起こせた。正規上限+マージンでクランプし色は24bit整数化。
+            const clamp = (v: number, lo: number, hi: number) => Math.min(Math.max(v, lo), hi)
+            const sz = fin(data.sz) ? clamp(data.sz, 0.02, 0.4) : undefined
+            const ex = fin(data.ex) ? clamp(data.ex, 0, 8) : undefined
+            const col = fin(data.col) ? (data.col >>> 0) & 0xffffff : undefined
             this.combat.fireBolt(
               new THREE.Vector3(data.ox, data.oy, data.oz),
               new THREE.Vector3(data.dx, data.dy, data.dz),
-              { damage: 0, team: data.tm === 'red' ? 'red' : 'blue', from: null, speed: fin(data.sp) ? data.sp : 130, color: data.col, size: fin(data.sz) ? data.sz : undefined, explosive: fin(data.ex) ? { radius: data.ex } : undefined, gravity: fin(data.gr) ? data.gr : undefined, visual: true },
+              { damage: 0, team: data.tm === 'red' ? 'red' : 'blue', from: null, speed: fin(data.sp) ? clamp(data.sp, 1, 600) : 130, color: col, size: sz, explosive: ex !== undefined ? { radius: ex } : undefined, gravity: fin(data.gr) ? clamp(data.gr, -50, 50) : undefined, visual: true },
             )
             sfx.shotFar(0.1)
           }
@@ -723,7 +729,7 @@ class BattleView implements View {
     for (const s of o.spheres) s.update(_dt)
     // ミニマップ用: コアと敵将reveal(ソナー)をホスト権威から反映(clientは権威simが無く自前で持てない)。
     // 非信頼peer(host)由来: cores/reveal も要素単位で検証(null要素でmap throw、NaNがminimapへ流入するのを防ぐ。score/spheresと一貫)
-    this.clientCores = (Array.isArray(snap.cores) ? snap.cores : []).filter((c) => c && fin(c.x) && fin(c.z)).map((c) => ({ x: c.x, z: c.z, small: !!c.s }))
+    this.clientCores = (Array.isArray(snap.cores) ? snap.cores.slice(0, 64) : []).filter((c) => c && fin(c.x) && fin(c.z)).map((c) => ({ x: c.x, z: c.z, small: !!c.s }))
     const rv = Array.isArray(snap.reveal) && fin(snap.reveal[0]) && fin(snap.reveal[1]) ? snap.reveal : [0, 0]
     this.world.revealT.blue = rv[0] // 敵将(青)reveal=clientが自分のソナーで点滅表示
     this.world.revealT.red = rv[1]   // 自機(赤)がreveal=被捕捉
@@ -787,6 +793,9 @@ class BattleView implements View {
       }
       const drift = Math.hypot(this.player.pos.x - me.x, this.player.pos.z - me.z)
       if (drift > 3) this.player.pos.set(me.x, this.player.pos.y, me.z)
+      // 高さ(y)の和解: 通常は#3のclient壁コライダーで予測が権威と一致するが、残差として権威yと大きく乖離(壁上等)
+      // したらソフト追従で寄せる(瞬間移動回避)。fin必須(NaN yでcamera/フラスタムが壊れ凍結する)。
+      if (fin(me.y) && Math.abs(this.player.pos.y - me.y) > 1.5) this.player.pos.y += (me.y - this.player.pos.y) * Math.min(1, _dt * 8)
     }
     // 勝敗(ホスト権威): カウント到達で終了
     if (!this.over && (snap.score[0] >= CAPTURE_TO_WIN || snap.score[1] >= CAPTURE_TO_WIN)) {
@@ -1700,21 +1709,25 @@ window.addEventListener('resize', () => {
   netMalformedSnapTest() {
     const [, c] = LoopbackTransport.pair(0)
     const client = new BattleView({ charKey: 'mimi', botLevel: 6, practice: false, mapKey: 'skyhaven' }, () => {}, { transport: c, role: 'client', oppCharKey: 'renji' })
+    // 悪意host: units/cores を巨大長で送る長さ攻撃(1フレーム大量THREE構築でフリーズ/OOMを狙う)。clampで64体に頭打ちにする。
+    const flood = Array.from({ length: 5000 }, (_, i) => ({ id: 10000 + i, kind: 'gunner', team: 'blue', x: 0, y: 0, z: 0, yaw: 0, hp: 1, mhp: 1, alive: true }))
     const bad: any[] = [
       { score: [1, 2], spheres: [0, 0, 0], timer: 100, units: [null], cores: [null], reveal: [NaN, 0], t: 1 },
       { score: [1, 2], spheres: [0, 0, 0], timer: 100, units: [42, null, { kind: 'commander', team: 'blue' }], cores: [{ x: NaN, z: 0, s: 0 }], reveal: 'oops', t: 2 },
       { score: 'x', spheres: null, units: 'nope', cores: 7, t: 3 }, // 配列性すら壊れたフレーム
+      { score: [2, 2], spheres: [0, 0, 0], timer: 100, units: flood, cores: flood.map(() => ({ x: 0, z: 0, s: false })), t: 3.5 }, // 長さ攻撃
     ]
     let threw = false
+    const floodPuppets = (() => { try { for (const b of bad) { (client as any).lastSnap = b; client.update(1 / 60) } return (client as any).puppets.puppets.size } catch { threw = true; return -1 } })()
     try {
-      for (const b of bad) { (client as any).lastSnap = b; client.update(1 / 60) }
       ;(client as any).lastSnap = { score: [3, 4], spheres: [0, 0, 0], timer: 90, units: [], cores: [], reveal: [0, 0], t: 4 } // 健全フレームで復帰
       client.update(1 / 60)
     } catch { threw = true }
     const survived = !threw && !client.over // 例外を出さず、勝手にfinishもしない
     const recovered = client.scores.blue === 3 && client.scores.red === 4 // 健全フレームは正常反映
+    const floodClamped = floodPuppets >= 0 && floodPuppets <= 64 // 5000件の長さ攻撃が64体に頭打ち(フリーズ/OOM回避)
     client.dispose()
-    return { ok: survived && recovered, survived, recovered, threw }
+    return { ok: survived && recovered && floodClamped, survived, recovered, floodClamped, floodPuppets, threw }
   },
   // PvP遅延/ジッタ耐性検証: 片道latencyMs+片側ジッタjitterMs(到着のバースト化=実DataChannelのhead-of-line)の
   // 決定的ループバックで host→client を回し、競技回線で ①例外/NaNが出ない ②相手将puppetが連続的に動く
@@ -2115,7 +2128,7 @@ window.addEventListener('resize', () => {
   // ①存在しないckで生成→placeholder(箱) ②modelKeyを実在キーへ差し替え再ingest→tryUpgradeで本物(SkinnedMesh)へ。
   netPuppetUpgradeTest() {
     const scene = new THREE.Scene()
-    const pm = new PuppetManager(scene)
+    const pm = new PuppetManager({ scene, addCollider() {}, removeCollider() {} } as any) // commanderのみ=wallpodコライダー経路は未使用
     pm.setLocalCommanderTeam('red')
     const mkSnap = (ck: string): any => ({ t: 0, units: [{ id: 99, kind: 'commander', team: 'blue', ck, x: 0, y: 0, z: 0, yaw: 0, hp: 100, mhp: 100, alive: true }], spheres: [0, 0, 0], score: [0, 0], timer: 180 })
     pm.ingest(mkSnap('__nomodel__')) // GLB未ロード/未知キーを模擬→placeholder(箱)

@@ -195,6 +195,11 @@ export class RemoteCommander implements Unit {
   private deploy(key: string, x: number, z: number) {
     if (!this.alive) return // 死亡中の配備を拒否(ローカルPlayerCommanderと対称化)
     if (!Number.isFinite(x) || !Number.isFinite(z)) return // 非信頼peer由来の不正座標を拒否
+    // 照準到達距離ガード: 正規clientは player.ts の MAXD=30m 以内しか要求できない(deployRay.far)。改造clientが
+    // 将から遠隔(敵スフィア/敵スポーン)へ配備し占領支援/スポーンキャンプするのを防ぐ。relocateは将方向へ寄せ距離を
+    // 縮めるだけなので要求点(クランプ前)で判定。+3 はレイ投影/relocate誤差の吸収マージン(=MAXD+3=33m)。
+    const ddx = x - this.group.position.x, ddz = z - this.group.position.z
+    if (ddx * ddx + ddz * ddz > 33 * 33) return // 過遠要求はTPも消費せず破棄
     const def = TOKENS[key]
     if (!def || !loadoutFor(this.char.uniqueToken).includes(key)) return // 不正キー拒否
     if (this.tp < def.cost) return

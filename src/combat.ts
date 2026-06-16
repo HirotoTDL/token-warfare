@@ -207,6 +207,9 @@ export class Combat {
   private boltMaterial(color: number): THREE.MeshBasicMaterial {
     let m = this.matCache.get(color)
     if (!m) {
+      // 色基数の上限ガード: 正規の弾色は固定パレット(数色)。悪意hostが中継fireで毎発別colを送るとMaterialが
+      // 無制限蓄積し緩慢リークするため、キャッシュが上限超なら新規色は既定色のmaterialへ畳む(視覚弾は近似で可)。
+      if (this.matCache.size >= 24) { const def = this.matCache.get(0xffe9a0) ?? this.matCache.values().next().value; if (def) return def }
       m = new THREE.MeshBasicMaterial({ color, transparent: true, opacity: 0.95, blending: THREE.AdditiveBlending, depthWrite: false })
       m.color.multiplyScalar(2.6) // HDR輝度に押し上げてブルームで光らせる
       this.matCache.set(color, m)
