@@ -8,7 +8,7 @@ import { Bgm } from './bgm'
 import { Input } from './input'
 import {
   CHARACTERS, TEAM_NAME, characterByKey,
-  MATCH_TIME, OVERTIME_AT, RESPAWN_TIME, RESPAWN_TIME_OT, RESPAWN_INVULN,
+  MATCH_TIME, OVERTIME_AT, RESPAWN_TIME, RESPAWN_TIME_OT, RESPAWN_INVULN, RESPAWN_INVULN_OT,
   TP_MOMENTUM_MUL, CORE_TP, CORE_TP_MOMENTUM_BONUS, SMALL_CORE_TP,
   type Team, type CharacterDef,
 } from './types'
@@ -720,9 +720,10 @@ class BattleView implements View {
         // 死亡→ローカルでリスポーンカウントダウン開始(HUD表示用。実復帰はsnapshotのme.aliveで反映)
         this.clientDeadCountdown = this.timer <= OVERTIME_AT ? RESPAWN_TIME_OT : RESPAWN_TIME
       } else if (me.alive && !this.player.alive) {
-        this.player.respawn(this.world.basePos.red, RESPAWN_INVULN)
+        const iv = this.timer <= OVERTIME_AT ? RESPAWN_INVULN_OT : RESPAWN_INVULN
+        this.player.respawn(this.world.basePos.red, iv)
         this.clientDeadCountdown = null
-        this.hud.message(`リスポーン — ${RESPAWN_INVULN}秒無敵`, 2)
+        this.hud.message(`リスポーン — ${iv}秒無敵(発砲で解除)`, 2)
       }
       const drift = Math.hypot(this.player.pos.x - me.x, this.player.pos.z - me.z)
       if (drift > 3) this.player.pos.set(me.x, this.player.pos.y, me.z)
@@ -829,11 +830,12 @@ class BattleView implements View {
         if (next <= 0) {
           delete this.respawnT[team]
           const base = this.world.basePos[team]
+          const iv = this.timer <= OVERTIME_AT ? RESPAWN_INVULN_OT : RESPAWN_INVULN // OT中はリスポーンも速い分、無敵も短く
           if (team === 'blue') {
-            this.player.respawn(base, RESPAWN_INVULN)
-            this.hud.message(`リスポーン — ${RESPAWN_INVULN}秒無敵`, 2)
+            this.player.respawn(base, iv)
+            this.hud.message(`リスポーン — ${iv}秒無敵(発砲で解除)`, 2)
           } else {
-            this.bot.respawn(base, RESPAWN_INVULN)
+            this.bot.respawn(base, iv)
           }
           // ワープイン演出
           this.fx.column(base.clone(), team === 'blue' ? 0x4db8ff : 0xff6a5a)

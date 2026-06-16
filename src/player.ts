@@ -6,7 +6,7 @@ import { Input } from './input'
 import {
   TEAM_COLOR, enemyOf,
   ENERGY_MAX, ENERGY_CHARGE_RATE, ENERGY_PASSIVE_RATE, ENERGY_PASSIVE_DELAY, CHARGE_SPEED_MUL,
-  TP_REGEN_BASE,
+  TP_REGEN_BASE, INVULN_ON_FIRE,
   type CharacterDef, type Team, type Unit,
 } from './types'
 import { TOKENS, DecoyUnit, loadoutFor } from './tokens'
@@ -369,6 +369,8 @@ export class PlayerCommander implements Unit {
   /** 1発(ペレット束)を発射 */
   private emitShot(moving: boolean, zoomed: boolean, sprinting = false) {
     const w = this.weapon
+    // 発砲した瞬間にスポーン無敵を解除(短く残す)=無敵のまま撃ち返す悪用を封じる(アリーナFPSの確立手法)
+    if (this.invulnT > INVULN_ON_FIRE) this.invulnT = INVULN_ON_FIRE
     if (this.stealthed) {
       this.stealthed = false
       this.skillActiveT = 0

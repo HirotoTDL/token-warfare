@@ -2,7 +2,7 @@ import * as THREE from 'three'
 import { World } from './world'
 import { Combat } from './combat'
 import { Sfx } from './sfx'
-import { TEAM_COLOR, ENERGY_MAX, TP_REGEN_BASE, enemyOf, falloffMul, type CharacterDef, type Team, type Unit } from './types'
+import { TEAM_COLOR, ENERGY_MAX, TP_REGEN_BASE, INVULN_ON_FIRE, enemyOf, falloffMul, type CharacterDef, type Team, type Unit } from './types'
 import { TOKENS, DecoyUnit, loadoutFor } from './tokens'
 import { buildMonsterCommander } from './models'
 import { getModel, animateGlbBody, animateSkeleton } from './modelLoader'
@@ -421,6 +421,7 @@ export class BotCommander implements Unit {
     const w = this.char.weapon
     if (this.energy < w.energyCost) return
     this.energy -= w.energyCost
+    if (this.invulnT > INVULN_ON_FIRE) this.invulnT = INVULN_ON_FIRE // 発砲でスポーン無敵を解除(無敵撃ち返し封じ)
     if (this.stealthed) this.setStealth(false)
     const origin = this.eye()
     const aim = t.group.position.clone()

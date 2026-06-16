@@ -227,7 +227,11 @@ export const MATCH_TIME = 180
 export const OVERTIME_AT = 30
 export const RESPAWN_TIME = 4
 export const RESPAWN_TIME_OT = 2
-export const RESPAWN_INVULN = 2.5
+// スポーン無敵: 「逃げる/向き直る猶予」を与えつつ発砲した瞬間に解除される(=無敵のまま撃ち返す悪用を封じる
+// アリーナFPS=UT4の確立手法)。長時間完全無敵はGAME_DESIGNの禁止事項なので短め。OT中はリスポーンも速い分さらに短縮。
+export const RESPAWN_INVULN = 2.0
+export const RESPAWN_INVULN_OT = 1.2
+export const INVULN_ON_FIRE = 0.3 // 発砲時に無敵を即この秒へ短縮(完全0だと撃った直後に被弾し理不尽なので僅かに残す)
 
 /** TP経済 */
 export const TP_REGEN_BASE = 1.2

@@ -4,7 +4,7 @@ import { Combat } from '../combat'
 import { Sfx } from '../sfx'
 import {
   ENERGY_MAX, ENERGY_CHARGE_RATE, ENERGY_PASSIVE_RATE, ENERGY_PASSIVE_DELAY, CHARGE_SPEED_MUL,
-  TP_REGEN_BASE, TEAM_COLOR, enemyOf,
+  TP_REGEN_BASE, TEAM_COLOR, INVULN_ON_FIRE, enemyOf,
   type CharacterDef, type Team, type Unit,
 } from '../types'
 import { buildMonsterCommander } from '../models'
@@ -287,6 +287,7 @@ export class RemoteCommander implements Unit {
 
   private emitShot(moving: boolean, zoomed: boolean, sprinting: boolean) {
     const w = this.weapon
+    if (this.invulnT > INVULN_ON_FIRE) this.invulnT = INVULN_ON_FIRE // 発砲でスポーン無敵を解除(無敵撃ち返し封じ)
     const od = this.skillKey === 'overdrive' && this.skillActiveT > 0 // オーバードライブ: 連射+60%・燃費半減
     this.fireCd = (1 / w.rate) / (od ? 1.6 : 1)
     this.energy -= w.energyCost * (od ? 0.5 : 1)
