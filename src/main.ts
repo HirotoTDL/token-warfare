@@ -1712,6 +1712,155 @@ window.addEventListener('resize', () => {
       (e: any) => ({ rejected: true, reason: (e && (e.type || e.message)) || 'unknown', ms: Math.round(performance.now() - t0) }),
     )
   },
+  // PvP実トランスポート検証(手動プローブ): netMatchTest相当のフル同期(snapshot/発射event/score/HP/sphere/skill/
+  // 死亡復帰/サドンデス/matchEnd/切断)を、Loopbackではなく『実WebRtcTransport×同一ページ2ピア×生PeerJSブローカー
+  // ×DataChannel』で回す。Loopbackでは原理的に出ない実トランスポート固有の4系統(①非同期配送 ②BinaryPack
+  // シリアライズ[undefined脱落/数値round-trip] ③state==='open'前のsend欠落 ④単一onMessageの後勝ち=ロビー→
+  // BattleView引き継ぎ順序)を捕捉する。非同期=結果は window.__netTestResultRTC にポーリング可能な形で書く。要ネット。
+  netMatchTestRTC() {
+    ;(window as any).__netTestResultRTC = { status: 'running' }
+    const fin = (r: any) => { (window as any).__netTestResultRTC = r }
+    const sleep = (ms: number) => new Promise<void>((res) => setTimeout(res, ms))
+    const tick = async (frames: number, host: any, client: any, h: any, c: any, gapMs = 16) => {
+      for (let i = 0; i < frames; i++) {
+        if (h.state !== 'open' && c.state !== 'open') break
+        host.update(1 / 60); client.update(1 / 60)
+        await sleep(gapMs) // 配送(マイクロタスク/イベントループ跨ぎ)を進める実時間ギャップ=Loopbackと違い必須
+      }
+    }
+    const run = async () => {
+      const { transport: h, ready } = WebRtcTransport.host()
+      let host: any = null, client: any = null, killed = false, c: any = null
+      const killer = setTimeout(() => {
+        killed = true
+        try { client?.dispose() } catch {} try { host?.dispose() } catch {}
+        try { h.close() } catch {}
+        if ((window as any).__netTestResultRTC?.status === 'running') fin({ status: 'timeout' })
+      }, 45000)
+      try {
+        const code = await ready
+        const joined = WebRtcTransport.join(code); c = joined.transport
+        await joined.connected
+        for (let w = 0; w < 100 && !(h.state === 'open' && c.state === 'open'); w++) await sleep(20)
+        const bothOpen = h.state === 'open' && c.state === 'open'
+        // ④ 単一onMessage後勝ち + ロビー→BattleView引き継ぎの再現(BattleView生成前にhello交換)
+        let hGotHello: string | null = null, cGotHello: string | null = null
+        h.onMessage((ch: any, d: any) => { if (ch === 'event' && d && d.type === 'hello') hGotHello = d.ck })
+        c.onMessage((ch: any, d: any) => { if (ch === 'event' && d && d.type === 'hello') cGotHello = d.ck })
+        c.send('event', { type: 'hello', ck: 'mimi' })
+        h.send('event', { type: 'hello', ck: 'renji' })
+        for (let w = 0; w < 60 && !(hGotHello && cGotHello); w++) await sleep(20)
+        const earlyHandshakeOk = hGotHello === 'mimi' && cGotHello === 'renji'
+        const noop = () => {}
+        host = new BattleView({ charKey: 'renji', botLevel: 6, practice: false, mapKey: 'skyhaven' }, noop, { transport: h, role: 'host', oppCharKey: hGotHello ?? 'mimi' })
+        client = new BattleView({ charKey: 'mimi', botLevel: 6, practice: false, mapKey: 'skyhaven' }, noop, { transport: c, role: 'client', oppCharKey: cGotHello ?? 'renji' })
+        let snapsSeen = 0
+        const origIngest = (client as any).puppets.ingest.bind((client as any).puppets)
+        ;(client as any).puppets.ingest = (s: any) => { snapsSeen++; origIngest(s) }
+        const hc = (host as any).combat, cc = (client as any).combat
+        let fireEvents = 0
+        const origFB = cc.fireBolt.bind(cc)
+        cc.fireBolt = (o: any, d: any, opts: any) => { if (opts && opts.visual) fireEvents++; return origFB(o, d, opts) }
+        host.player.pos.set(5, 0, 10); host.player.group.position.copy(host.player.pos)
+        host.bot.hp = 70
+        // ① 非同期配送の観測: send直後『同一tick』ではpuppet未更新(Loopbackは同tick到達)
+        const snapsBeforeOneTick = snapsSeen
+        host.update(1 / 60)
+        await sleep(120)
+        client.update(1 / 60)
+        const asyncDeliveryObserved = snapsSeen === snapsBeforeOneTick
+        let peakClientBolts = 0
+        for (let f = 0; f < 60; f++) {
+          if (f % 4 === 0) hc.fireBolt(new THREE.Vector3(2, 1.5, 9), new THREE.Vector3(0.1, 0.2, 1), { damage: 10, team: 'blue', from: host.player, speed: 130, size: 0.09 })
+          if (f % 6 === 0 && host.player.hp > 25) host.player.hp -= 8
+          host.update(1 / 60); client.update(1 / 60)
+          peakClientBolts = Math.max(peakClientBolts, cc.boltCount)
+          await sleep(16)
+        }
+        const clientVisualBolts = fireEvents
+        const hostRedTokBefore = host.world.units.filter((u: any) => u.team === 'red' && !u.isCommander).length
+        c.send('event', { type: 'deploy', key: 'gunner', x: 0, z: -5 })
+        await tick(20, host, client, h, c)
+        const deploySpawnedToken = host.world.units.filter((u: any) => u.team === 'red' && !u.isCommander).length > hostRedTokBefore
+        const redTok = host.world.units.find((u: any) => u.team === 'red' && !u.isCommander)
+        const relayBefore = fireEvents
+        if (redTok) hc.fireBolt(redTok.group.position.clone(), new THREE.Vector3(0, 0, 1), { damage: 10, team: 'red', from: redTok, speed: 130, size: 0.09 })
+        await tick(12, host, client, h, c)
+        const redTokenBoltRelayed = fireEvents > relayBefore
+        const ownBefore = fireEvents
+        hc.fireBolt(new THREE.Vector3(0, 1.5, 0), new THREE.Vector3(0, 0, 1), { damage: 10, team: 'red', from: host.bot, speed: 130, size: 0.09 })
+        await tick(12, host, client, h, c)
+        const ownCommanderBoltNotRelayed = fireEvents === ownBefore
+        c.send('event', { type: 'skill' })
+        await tick(10, host, client, h, c)
+        const skillActivated = (host.bot as any).skillCd > 0
+        let clientSphereBanner: any = null
+        const origKB = (client as any).hud.killBanner.bind((client as any).hud)
+        ;(client as any).hud.killBanner = (msg: string, good: boolean) => { clientSphereBanner = { msg, good }; return origKB(msg, good) }
+        ;(host as any).objectives.center.charge = -0.9
+        await tick(16, host, client, h, c)
+        ;(client as any).hud.killBanner = origKB
+        const clientSphereCaptureFeedback = !!clientSphereBanner && /確保/.test(clientSphereBanner.msg) && clientSphereBanner.good === true
+        ;(host as any).objectives.count.blue = 5
+        await tick(12, host, client, h, c)
+        const clientMomentumWhenBehind = (client as any).player.tpRegenMul > 1
+        ;(host as any).objectives.count.blue = 0
+        await tick(8, host, client, h, c)
+        ;(host.bot as any).alive = false
+        await tick(12, host, client, h, c)
+        const clientDeathCountdown = (client as any).clientDeadCountdown > 0
+        ;(host.bot as any).alive = true
+        await tick(12, host, client, h, c)
+        const clientRespawnCleared = (client as any).clientDeadCountdown === null && client.player.alive
+        ;(host as any).suddenDeath = true
+        await tick(16, host, client, h, c)
+        const suddenDeathSynced = (client as any).suddenDeath === true
+        let clientEndJingle: string | null = null
+        const origJingle = (bgm as any).jingle.bind(bgm)
+        ;(bgm as any).jingle = (k: string) => { clientEndJingle = k; return origJingle(k) }
+        h.send('event', { type: 'matchEnd', score: [30, 5] })
+        await tick(10, host, client, h, c)
+        ;(bgm as any).jingle = origJingle
+        const matchEndSynced = client.over === true && client.scores.blue === 30
+        const clientLossPerspective = clientEndJingle === 'lose'
+        const pm = (client as any).puppets
+        const puppetCount = (pm as any).puppets.size
+        let bluePuppetHp: any = null
+        for (const [, p] of (pm as any).puppets) { bluePuppetHp = { hp: p.hp, mhp: p.mhp }; break }
+        const jsonRoundTripOk = !!bluePuppetHp && Number.isFinite(bluePuppetHp.hp) && bluePuppetHp.hp <= 70
+        const r: any = {
+          status: 'done',
+          code, bothOpen, earlyHandshakeOk, asyncDeliveryObserved, jsonRoundTripOk,
+          snapsReceived: snapsSeen, clientPuppetCount: puppetCount, aBluePuppetHp: bluePuppetHp,
+          clientScores: client.scores, hostScores: host.scores, clientPlayerTeam: client.player.team,
+          clientVisualBolts, peakClientBolts, deploySpawnedToken, redTokenBoltRelayed, ownCommanderBoltNotRelayed,
+          skillActivated, clientSphereCaptureFeedback, clientMomentumWhenBehind, clientDeathCountdown,
+          clientRespawnCleared, suddenDeathSynced, matchEndSynced, clientLossPerspective,
+          clientCombatFeedback: { dealt: Math.round(client.stats.dmgDealt), taken: Math.round(client.stats.dmgTaken) },
+          hostState: h.state, clientState: c.state,
+        }
+        r.ok = bothOpen && earlyHandshakeOk && asyncDeliveryObserved && jsonRoundTripOk &&
+          snapsSeen > 0 && puppetCount > 0 && clientVisualBolts > 0 && deploySpawnedToken &&
+          redTokenBoltRelayed && ownCommanderBoltNotRelayed && skillActivated &&
+          clientSphereCaptureFeedback && clientMomentumWhenBehind && clientDeathCountdown &&
+          clientRespawnCleared && suddenDeathSynced && matchEndSynced && clientLossPerspective &&
+          client.stats.dmgDealt > 0 && client.stats.dmgTaken > 0
+        try { c.close() } catch {}
+        await tick(8, host, client, h, c)
+        r.disconnectEndsMatch = host.over && client.over
+        r.ok = r.ok && r.disconnectEndsMatch
+        if (!killed) { clearTimeout(killer); fin(r) }
+      } catch (e: any) {
+        clearTimeout(killer)
+        if (!killed) fin({ status: 'error', err: String(e && (e.message || e)), hostState: h.state, clientState: c?.state })
+      } finally {
+        try { client?.dispose() } catch {} try { host?.dispose() } catch {}
+        try { c?.close() } catch {} try { h.close() } catch {}
+      }
+    }
+    run()
+    return 'started — poll window.__netTestResultRTC'
+  },
 }
 
 // --- メインループ ---
