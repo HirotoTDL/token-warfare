@@ -745,6 +745,7 @@ class BattleView implements View {
       this.player.hp = me.hp
       this.player.maxHp = me.mhp
       if (me.tp !== undefined && fin(me.tp)) this.player.tp = me.tp // TPはホスト権威(配備可否・HUD表示を一致させる)。NaNはdeployコストゲートを無効化するので弾く
+      this.player.stealthed = !!me.st // 自機ステルスはホスト権威。clientはonSkillでactivateSkillを抑止しローカルでは立たないため、HUD/一人称演出をsnapshotから反映
       if (!me.alive && this.player.alive) {
         this.player.alive = false
         // 死亡→ローカルでリスポーンカウントダウン開始(HUD表示用。実復帰はsnapshotのme.aliveで反映)
@@ -894,8 +895,11 @@ class BattleView implements View {
       }
     }
 
-    // ヒットストップ中はゲーム世界だけスローになる
-    const udt = this.hitstopT > 0 ? dt * 0.25 : dt
+    // ヒットストップ中はゲーム世界だけスローになる(撃破/占領の手応え演出)。
+    // ただしオンラインでは適用しない: ホストのヒットストップが権威sim(RemoteCommander=クライアント自機)まで25%速度に鈍らせ、
+    // クライアントのローカル予測は素のdtでフル速度のため、撃破直後に権威位置が約2.5m後方へラグ→当たり判定/占領/コア回収が
+    // 見た目とズレる。オンラインは常に素のdtで進め、スロー演出はオフライン単体プレイ限定とする。
+    const udt = (!this.net && this.hitstopT > 0) ? dt * 0.25 : dt
     this.hitstopT = Math.max(0, this.hitstopT - dt)
     for (const u of [...this.world.units]) u.update(udt)
     this.fx.update(udt)
@@ -1135,6 +1139,7 @@ function lobbyErrMsg(e: any, joining: boolean): string {
 function onNetConnected(transport: NetTransport, role: NetRole) {
   pendingNet = { transport, role }
   setOnlineCharLock(false) // 新規接続=毎回ロスターを解錠(前セッションのロック残留や再戦経路の取りこぼしを一掃)
+  resetSortieButton() // 前セッションの「相手を待っています…」/disabled/孤立タイマーを持ち越さない
   let sentReady = false
   let oppChar: string | null = null
   let oppMap: string | null = null
@@ -1178,6 +1183,9 @@ function onNetConnected(transport: NetTransport, role: NetRole) {
     clearTimeout(readyWaitTimer)
     readyWaitTimer = setTimeout(() => {
       if (started) return
+      // 撤回直前に相手readyの到着を再確認: 相手が既に宣言済み(oppChar有)なら撤回せず即開始し、
+      // 「自分のタイマーが先に発火→相手は自分の旧readyで開始済み→片側だけ開始でフリーズ」のレースを閉じる。
+      if (oppChar) { tryStart(); if (started) return }
       sentReady = false
       committedChar = null
       try { transport.send('event', { type: 'unready' }) } catch { /* noop */ } // 撤回を相手に通知(古い宣言キャラでの開始を防ぐ)
@@ -1313,6 +1321,12 @@ CHARACTERS.forEach((c, idx) => {
 // 出撃処理(出撃ボタンとサムネのダブルクリックで共有)。
 // 重要: オンライン接続中(pendingNet)は必ず ready 交換を通す。直接 startBattle(net無し) を呼ぶと
 // オフラインCPU戦が即開始し「片方だけ試合が始まる/CPUと対戦」バグになるため、入口を1本化する。
+let sortieResetTimer: ReturnType<typeof setTimeout> | undefined // 出撃ボタンの「相手を待っています…」を戻すタイマー(次セッションへ持ち越さないようハンドル保持)
+function resetSortieButton() {
+  clearTimeout(sortieResetTimer)
+  const sortie = document.getElementById('btn-sortie') as HTMLButtonElement
+  sortie.textContent = '出 撃'; sortie.disabled = false
+}
 function doSortie() {
   sfx.unlock()
   if (pendingNet && pendingNetSortie) {
@@ -1320,7 +1334,8 @@ function doSortie() {
     const sortie = document.getElementById('btn-sortie')!
     sortie.textContent = '相手を待っています…'
     ;(sortie as HTMLButtonElement).disabled = true
-    setTimeout(() => { sortie.textContent = '出 撃'; (sortie as HTMLButtonElement).disabled = false }, 8000)
+    clearTimeout(sortieResetTimer)
+    sortieResetTimer = setTimeout(resetSortieButton, 8000) // ハンドル保持: 次セッションのonNetConnectedで確実にクリア/即リセット
   } else {
     startBattle(selectedChar.key)
   }
