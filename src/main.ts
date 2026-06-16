@@ -443,6 +443,8 @@ class BattleView implements View {
       this.player.respawn(this.world.basePos.red, 0) // 赤陣スポーンへ
       // 配備はローカル生成せずホストへ要求(ホスト権威spawn→snapshotでpuppet描画)。戻り値trueでローカル抑止。
       this.player.onDeploy = (key, x, z) => { net!.transport.send('event', { type: 'deploy', key, x, z }); return true }
+      // client自配備トークンはworld.units外のpuppetなので、同時数判定もpuppet実数で行う(満杯時に正しく拒否=誤成功演出を防ぐ)
+      this.player.countActiveFn = (t, k) => this.puppets ? this.puppets.countActive(t, k) : 0
       // スキルもホスト権威。効果はsnapshotで反映(ステルス等)。ローカルはcd/演出のみ(HUD維持)。
       this.player.onSkill = () => { net!.transport.send('event', { type: 'skill' }); return true }
       this.puppets = new PuppetManager(this.world.scene)
@@ -1152,6 +1154,8 @@ function onNetConnected(transport: NetTransport, role: NetRole) {
       clearTimeout(selectTimer) // 未発火のselect遷移を止める(切断通知のロビー画面を上書きさせない=オフラインCPU戦化を防ぐ)
       clearTimeout(readyWaitTimer)
       setOnlineCharLock(false) // ロスターロック解除(次の対戦/オフラインに備える)
+      // 既に state='closed' なので close() の冪等ガードでは peer が破棄されない→dispose で孤立Peer(ブローカーWS+ICE)を確実回収
+      try { transport.dispose?.() } catch { /* noop */ }
       pendingNet = null
       pendingNetSortie = null
       lobbyTransport = null

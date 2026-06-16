@@ -78,7 +78,11 @@ export class WebRtcTransport implements NetTransport {
         if (!idIssued && t.state === 'connecting') { t.setState('failed'); t.cleanupPeer(); reject(new Error('timeout')) }
       }, timeoutMs)
       peer.on('open', (id) => { idIssued = true; clearTimeout(timer); t.roomCode = id; resolve(id) }) // 部屋コード発行(待受開始)
-      peer.on('connection', (conn) => t.bind(conn)) // 参加者が来たら接続を確立
+      // 参加者が来たら接続を確立。既に対戦相手が居る(conn確立済み)場合の2人目は拒否=送信先(this.conn)の乗っ取りを防ぐ。
+      peer.on('connection', (conn) => {
+        if (t.conn) { try { conn.close() } catch { /* noop */ } return }
+        t.bind(conn)
+      })
       peer.on('error', (e) => {
         // 部屋コード発行前(待受確立前)の error のみ致命=即reject。発行後(参加者待ち中)の network/socket-* は
         // 一時的な回線ゆらぎなので peer を破棄せず部屋を生かす(従来は無条件 destroy で部屋がサイレント死していた)。
@@ -110,7 +114,12 @@ export class WebRtcTransport implements NetTransport {
         const conn = peer.connect(code, { reliable: true })
         t.bind(conn, done)
       })
-      peer.on('error', (e) => { clearTimeout(timer); t.setState('failed'); t.cleanupPeer(); reject(e) })
+      // 接続確立前(open前)の error のみ致命=reject。open後(対戦中)のブローカー由来 network/socket-* は握りつぶす
+      // (host() line 85 と対称化。これが無いとブローカー一時エラーでクライアント側だけマッチが強制終了していた)。
+      // open後の本当の切断は DataChannel の conn.on('close'/'error')(bind)が検知する。
+      peer.on('error', (e) => { if (t.state !== 'open') { clearTimeout(timer); t.setState('failed'); t.cleanupPeer(); reject(e) } })
+      // open後にブローカーWSが切れても DataChannel を生かしたまま同idで再接続を試みる(host側と対称)。
+      peer.on('disconnected', () => { if (t.state === 'open') { try { peer.reconnect() } catch { /* noop */ } } })
     })
     return { transport: t, connected }
   }
@@ -151,6 +160,15 @@ export class WebRtcTransport implements NetTransport {
     this.conn = null
     this.peer = null
     this.setState('closed')
+  }
+
+  /** state に関わらず peer/conn を確実に破棄する(close() の 'closed' 冪等ガードを回避)。
+   *  相手切断で既に state='closed' になった後でも、孤立した PeerJS Peer(ブローカーWS+ICE)を確実に回収するため。 */
+  dispose(): void {
+    try { this.conn?.close() } catch { /* noop */ }
+    try { this.peer?.destroy() } catch { /* noop */ }
+    this.conn = null
+    this.peer = null
   }
 
   private setState(s: NetState) {

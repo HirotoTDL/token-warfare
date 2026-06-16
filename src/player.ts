@@ -101,6 +101,8 @@ export class PlayerCommander implements Unit {
   onDeploy: ((tokenKey: string, x: number, z: number) => boolean) | null = null
   /** オンラインclient用: スキル発動時に呼ぶ。trueを返すとローカル効果を抑止(ホスト権威で適用、結果はsnapshot反映) */
   onSkill: (() => boolean) | null = null
+  /** 同時数カウント源。オンラインclientは自配備トークンがworld.units外のpuppetなので注入で上書きする(既定=world.countActive) */
+  countActiveFn: ((team: Team, kind: string) => number) | null = null
 
   private world: World
   private combat: Combat
@@ -611,7 +613,8 @@ export class PlayerCommander implements Unit {
       this.sfx.denied()
       return
     }
-    if (this.world.countActive(this.team, def.key) >= def.maxActive) {
+    const activeCount = this.countActiveFn ? this.countActiveFn(this.team, def.key) : this.world.countActive(this.team, def.key)
+    if (activeCount >= def.maxActive) {
       this.onMessage?.(`${def.name}は同時${def.maxActive}体まで`)
       this.sfx.denied()
       return

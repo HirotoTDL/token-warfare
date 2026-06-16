@@ -15,6 +15,8 @@ export interface NetTransport {
   onMessage(cb: (ch: NetChannel, data: any) => void): void
   onStateChange(cb: (s: NetState) => void): void
   close(): void
+  /** state に関わらず下層資源(peer/conn等)を確実に破棄する。close()の冪等ガードで破棄が抜ける状況の保険(任意実装) */
+  dispose?(): void
 }
 
 /**

@@ -73,6 +73,7 @@ export class RemoteCommander implements Unit {
   private fireCd = 0
   private burstLeft = 0 // バースト武器(リコ等)の残発数。PlayerCommanderと同じ3点バースト挙動を再現
   private burstT = 0
+  private pendingFire = false // セミオート発砲エッジ(クリック)の蓄積。update毎に1回だけ消費(ローカルのendFrameクリアと対称)
   private lastFireT = 0
   private coyote = 0
   private jumpHeld = false
@@ -113,6 +114,9 @@ export class RemoteCommander implements Unit {
     // 移動軸は[-1,1]へクランプ(過大値で異常加速させない)
     ni.mx = Math.max(-1, Math.min(1, ni.mx))
     ni.mz = Math.max(-1, Math.min(1, ni.mz))
+    // セミオート発砲エッジは別フラグへOR蓄積する。クライアントFPS>ホストFPSや回線ジッタで firePressed=true の直後に
+    // firePressed未設定フレームが来て this.input を上書きしてもエッジを取りこぼさない(コアレッシング耐性)。
+    if (ni.firePressed) this.pendingFire = true
     this.input = ni
   }
 
@@ -239,6 +243,7 @@ export class RemoteCommander implements Unit {
     this.skillKey = ''
     this.dashT = 0
     this.regenDelay = 0 // 復帰時は回復待ちを残さない(PlayerCommander.respawnと対称)
+    this.pendingFire = false // 死亡前に溜まったクリックで復帰直後に暴発しない
     this.group.visible = true
     this.group.position.copy(this.pos)
   }
@@ -284,7 +289,9 @@ export class RemoteCommander implements Unit {
       if (this.charging) this.energy = Math.min(ENERGY_MAX, this.energy + ENERGY_CHARGE_RATE * dt)
       else if (this.lastFireT > ENERGY_PASSIVE_DELAY) this.energy = Math.min(ENERGY_MAX, this.energy + ENERGY_PASSIVE_RATE * dt)
     }
-    const zoomed = charger ? this.charging : (!!ni && ni.zoom && !this.charging)
+    // チャージ武器は溜め中(charging)に加え右クリックADS(ni.zoom)もズーム扱い=player.ts:211と対称。
+    // これが欠けると、ガロが右クリックADS中(未チャージ)にホストだけ減速せず最大2.6倍速になり、巻き戻り/サーバ側機動有利が出る。
+    const zoomed = charger ? (this.charging || (!!ni && ni.zoom)) : (!!ni && ni.zoom && !this.charging)
 
     // --- 移動(player.ts と同一モデル) ---
     const fwd = new THREE.Vector3(-Math.sin(this.yaw), 0, -Math.cos(this.yaw))
@@ -347,11 +354,13 @@ export class RemoteCommander implements Unit {
           this.emitShot(moving, zoomed, sprinting)
         }
       }
-      // オート武器=ホールド(wantFire)、セミオート(auto:false=ジン/ナナセ)=クリックの立ち上がりエッジ(firePressed)で判定。
-      // player.ts:358 と同一(これが無いとホスト権威でセミオートがフルオート連射し、オンライン限定で実DPSが跳ね上がっていた)。
-      const trigger = w.auto ? wantFire : !!(ni && ni.firePressed)
+      // オート武器=ホールド(wantFire)、セミオート(auto:false=ジン/ナナセ)=クリックの立ち上がりエッジで判定。
+      // エッジ(pendingFire)はこのupdateで必ず1回だけ消費する(発射可否に依らずクリア)=ローカルのendFrame毎クリアと対称。
+      // これで「撃てない間(CD/エネ不足)にエッジが残留し回復時に勝手に発射」「同一エッジを複数update再利用」を両方防ぐ。
+      const semiPressed = this.pendingFire
+      this.pendingFire = false
+      const trigger = w.auto ? wantFire : semiPressed
       if (trigger && this.fireCd <= 0 && !this.charging && this.burstLeft <= 0 && this.energy >= cost) {
-        if (ni && !w.auto) ni.firePressed = false // セミオートのエッジを消費(同一入力フレームの再利用で二重発射しない)
         this.energy -= cost
         this.fireCd = 1 / rate
         this.lastFireT = 0
