@@ -450,16 +450,23 @@ class BattleView implements View {
       net!.transport.onMessage((ch, data: any) => {
         if (ch === 'state') this.lastSnap = data as Snapshot
         else if (ch === 'event' && data && data.type === 'fire') {
-          // ホストから来た発射(相手将/双方トークン)を視覚弾として再生(ダメージはホスト権威=snapshotのHPで反映)
-          this.combat.fireBolt(
-            new THREE.Vector3(data.ox, data.oy, data.oz),
-            new THREE.Vector3(data.dx, data.dy, data.dz),
-            { damage: 0, team: data.tm ?? 'blue', from: null, speed: data.sp ?? 130, color: data.col, size: data.sz, explosive: data.ex ? { radius: data.ex } : undefined, gravity: data.gr, visual: true },
-          )
-          sfx.shotFar(0.1)
+          // ホストから来た発射(相手将/双方トークン)を視覚弾として再生(ダメージはホスト権威=snapshotのHPで反映)。
+          // 非信頼peer境界なので座標/方向の有限性を検証(NaN/Infを通すと弾プールが永続汚染されWebGL描画が回復不能に壊れる)。
+          const fin = (v: any) => typeof v === 'number' && Number.isFinite(v)
+          const dirOk = fin(data.dx) && fin(data.dy) && fin(data.dz) && (data.dx * data.dx + data.dy * data.dy + data.dz * data.dz) > 1e-8
+          if (fin(data.ox) && fin(data.oy) && fin(data.oz) && dirOk && (data.sp === undefined || fin(data.sp))) {
+            this.combat.fireBolt(
+              new THREE.Vector3(data.ox, data.oy, data.oz),
+              new THREE.Vector3(data.dx, data.dy, data.dz),
+              { damage: 0, team: data.tm === 'red' ? 'red' : 'blue', from: null, speed: fin(data.sp) ? data.sp : 130, color: data.col, size: fin(data.sz) ? data.sz : undefined, explosive: fin(data.ex) ? { radius: data.ex } : undefined, gravity: fin(data.gr) ? data.gr : undefined, visual: true },
+            )
+            sfx.shotFar(0.1)
+          }
         } else if (ch === 'event' && data && data.type === 'matchEnd') {
           // ホストがマッチ終了(占領達成/時間切れ/サドンデス)→クライアントも確定スコアで終了
-          if (!this.over) { this.scores.blue = data.score[0]; this.scores.red = data.score[1]; this.finish() }
+          if (!this.over && Array.isArray(data.score) && Number.isFinite(data.score[0]) && Number.isFinite(data.score[1])) {
+            this.scores.blue = data.score[0]; this.scores.red = data.score[1]; this.finish()
+          }
         }
       })
     } else {
@@ -1000,6 +1007,7 @@ function backToMenu(target: 'title' | 'mode' | 'select') {
   if (pendingNet) { try { pendingNet.transport.close() } catch { /* noop */ } }
   pendingNet = null
   pendingNetSortie = null
+  setOnlineCharLock(false)
   view.dispose()
   battle = null
   view = new MenuView()
@@ -1094,18 +1102,21 @@ function onNetConnected(transport: NetTransport, role: NetRole) {
   let oppChar: string | null = null
   let oppMap: string | null = null
   let started = false
+  let committedChar: CharacterDef | null = null // ready送信時に確定したキャラ。以降の選択変更に左右されない
   const tryStart = () => {
-    if (started || !sentReady || !oppChar) return
+    if (started || !sentReady || !oppChar || !committedChar) return
     started = true
     pendingNetSortie = null
+    clearTimeout(selectTimer) // 念のため(既にselect表示済みのはず)
     if (role !== 'host' && oppMap) pendingMap = oppMap // ホストのマップに合わせる
-    startBattle(selectedChar.key, { transport, role, oppCharKey: oppChar })
+    // 送信した ready の char(=committedChar)で必ず出撃する。出撃後にselectedCharが変わっても食い違わない。
+    startBattle(committedChar.key, { transport, role, oppCharKey: oppChar })
   }
   // ready受信(相手の出撃)。出撃前に来ても保持してtryStartで合流する。
   transport.onMessage((ch, data: any) => {
-    if (ch === 'event' && data && data.type === 'ready') {
+    if (ch === 'event' && data && data.type === 'ready' && typeof data.char === 'string') {
       oppChar = data.char
-      oppMap = data.map
+      oppMap = typeof data.map === 'string' ? data.map : null
       tryStart()
     }
   })
@@ -1113,13 +1124,17 @@ function onNetConnected(transport: NetTransport, role: NetRole) {
   pendingNetSortie = () => {
     if (sentReady) return
     sentReady = true
-    transport.send('event', { type: 'ready', char: selectedChar.key, map: pendingMap })
+    committedChar = selectedChar // ここで確定。以降ロスターをロックして変更不能に(宣言キャラ=出撃キャラを保証)
+    setOnlineCharLock(true)
+    transport.send('event', { type: 'ready', char: committedChar.key, map: pendingMap })
     tryStart()
   }
   // ロビー中(キャラ選択〜出撃前)に相手が切断したら、無限待ちにせずロビーへ戻して通知する。
   // 対戦開始後は BattleView 側が onStateChange を上書きして自前で終了処理する(役割交代)。
   transport.onStateChange((s) => {
     if ((s === 'closed' || s === 'failed') && !started) {
+      clearTimeout(selectTimer) // 未発火のselect遷移を止める(切断通知のロビー画面を上書きさせない=オフラインCPU戦化を防ぐ)
+      setOnlineCharLock(false) // ロスターロック解除(次の対戦/オフラインに備える)
       pendingNet = null
       pendingNetSortie = null
       lobbyTransport = null
@@ -1128,8 +1143,10 @@ function onNetConnected(transport: NetTransport, role: NetRole) {
     }
   })
   lobbyShowStatus('P2P接続が確立しました！コマンダーを選んで出撃。')
-  setTimeout(() => showScreen('select'), 600)
+  // 600ms後にselectへ。ハンドルを保持し、切断時はキャンセルする。発火時も接続生存を再確認(切断後にselectへ飛ばさない)。
+  selectTimer = setTimeout(() => { if (!started && pendingNet && transport.state === 'open') showScreen('select') }, 600)
 }
+let selectTimer: ReturnType<typeof setTimeout> | undefined
 
 document.getElementById('btn-online')!.addEventListener('click', () => {
   sfx.unlock()
@@ -1166,6 +1183,8 @@ document.getElementById('btn-lobby-back')!.addEventListener('click', () => {
   sfx.unlock()
   lobbyCleanup()
   pendingNet = null
+  pendingNetSortie = null
+  setOnlineCharLock(false)
   showScreen('mode')
 })
 
@@ -1179,8 +1198,15 @@ const detailsRoot = document.getElementById('char-details')!
 const rosterThumbs: HTMLElement[] = []
 let selectedChar = CHARACTERS[0]
 let selectedIdx = 0
+let onlineCharLocked = false // オンラインでready送信後はキャラ変更不可(宣言キャラ≠出撃キャラの食い違いを防ぐ)
+function setOnlineCharLock(locked: boolean) {
+  onlineCharLocked = locked
+  rosterRoot.classList.toggle('locked', locked)
+  for (const t of rosterThumbs) (t as HTMLButtonElement).disabled = locked
+}
 
 function selectCharacter(c: CharacterDef, idx: number) {
+  if (onlineCharLocked) return // ready送信後はロック中。選択を変えても出撃キャラは確定済み(committedChar)
   selectedChar = c
   selectedIdx = idx
   const colorHex = `#${c.color.toString(16).padStart(6, '0')}`

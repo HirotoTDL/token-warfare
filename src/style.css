@@ -172,6 +172,8 @@ body {
   display: flex; gap: 10px; flex-wrap: wrap; justify-content: center;
   max-width: 1080px;
 }
+/* オンライン: ready送信後はキャラ確定=ロスターをロック(選択変更不可を視覚化) */
+.char-roster.locked { opacity: 0.5; pointer-events: none; filter: grayscale(0.4); }
 .roster-thumb {
   --cc: #ff4fa3; cursor: pointer; padding: 0; background: none; border: none;
   display: flex; flex-direction: column; align-items: center; gap: 3px;

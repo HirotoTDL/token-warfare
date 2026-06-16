@@ -70,6 +70,8 @@ export class RemoteCommander implements Unit {
   private input: NetInput | null = null
   private lastSeq = -1
   private fireCd = 0
+  private burstLeft = 0 // バースト武器(リコ等)の残発数。PlayerCommanderと同じ3点バースト挙動を再現
+  private burstT = 0
   private lastFireT = 0
   private coyote = 0
   private jumpHeld = false
@@ -99,10 +101,17 @@ export class RemoteCommander implements Unit {
     this.animPrev.copy(this.pos)
   }
 
-  /** 受信した入力を反映(最新フレームを採用。Phase1でジッタバッファ/補間を追加) */
+  /** 受信した入力を反映(最新フレームを採用。Phase1でジッタバッファ/補間を追加)。
+   *  P2Pでは相手peerは非信頼境界なので、数値の有限性を必ず検証する。NaN/Inf/欠損seqを通すと
+   *  順序保証が恒久破壊され、yaw等のNaNが座標→snapshotへ伝播して全員の画面が壊れる(マッチ破壊DoS)。 */
   setInput(ni: NetInput) {
+    if (!ni || !Number.isFinite(ni.seq) || !Number.isFinite(ni.mx) || !Number.isFinite(ni.mz) ||
+        !Number.isFinite(ni.yaw) || !Number.isFinite(ni.pitch)) return // 不正フレームは破棄(lastSeqは壊さない)
     if (ni.seq <= this.lastSeq) return // 古い/重複フレームは破棄
     this.lastSeq = ni.seq
+    // 移動軸は[-1,1]へクランプ(過大値で異常加速させない)
+    ni.mx = Math.max(-1, Math.min(1, ni.mx))
+    ni.mz = Math.max(-1, Math.min(1, ni.mz))
     this.input = ni
   }
 
@@ -117,6 +126,7 @@ export class RemoteCommander implements Unit {
 
   /** クライアントのスキル発動をホスト権威で適用(PlayerCommander.activateSkillのミラー。効果はsnapshotで相手にも反映) */
   private activateSkill() {
+    if (!this.alive) return // 死亡中の発動を拒否(ローカルPlayerCommanderはupdate早期returnで不可能=対称化)
     const s = this.char.skill
     if (this.skillCd > 0) return // 連打/不正の保険
     this.skillCd = s.cooldown
@@ -158,12 +168,31 @@ export class RemoteCommander implements Unit {
 
   /** クライアントの配備要求をホスト権威で実行(TP/同時数を検証して赤陣営トークンをspawn) */
   private deploy(key: string, x: number, z: number) {
+    if (!this.alive) return // 死亡中の配備を拒否(ローカルPlayerCommanderと対称化)
+    if (!Number.isFinite(x) || !Number.isFinite(z)) return // 非信頼peer由来の不正座標を拒否
     const def = TOKENS[key]
     if (!def || !loadoutFor(this.char.uniqueToken).includes(key)) return // 不正キー拒否
     if (this.tp < def.cost) return
     if (this.world.countActive(this.team, def.key) >= def.maxActive) return
+    // 配置先をホスト権威で検証(PlayerCommander.tryDeploy と同一): アリーナ内へクランプし、塞がっていれば将方向へ
+    // 寄せて空きセルを探す(見つからなければ拒否)。これが無いと改造クライアントがアリーナ外/壁内/敵スフィア直上へ
+    // 配備でき、静止トークン(壁/砲台)は恒久ナビ汚染も起こす。relocateで正規の near-obstacle 配備は従来どおり通す。
+    const lim = this.world.arenaHalf - 1.5
+    let tx = Math.max(-lim, Math.min(lim, x))
+    let tz = Math.max(-lim, Math.min(lim, z))
+    if (!this.world.nav.isFree(tx, tz)) {
+      let dx = this.group.position.x - tx, dz = this.group.position.z - tz
+      const len = Math.hypot(dx, dz) || 1
+      dx /= len; dz /= len
+      let found = false
+      for (let step = 1.5; step <= 9; step += 1.5) {
+        const cx = tx + dx * step, cz = tz + dz * step
+        if (this.world.nav.isFree(cx, cz)) { tx = cx; tz = cz; found = true; break }
+      }
+      if (!found) return // 近くに空きが無ければ配備しない(TPも消費しない)
+    }
     this.tp -= def.cost
-    const pos = new THREE.Vector3(x, 0, z)
+    const pos = new THREE.Vector3(tx, 0, tz)
     const facing = pos.clone().sub(this.group.position).setY(0)
     if (facing.lengthSq() < 1e-4) facing.set(0, 0, 1)
     facing.normalize()
@@ -180,6 +209,7 @@ export class RemoteCommander implements Unit {
     if (!this.alive || this.invulnT > 0) return
     let amt = amount
     if (this.skillActiveT > 0) { if (this.skillKey === 'dome') amt *= 0.4; else if (this.skillKey === 'dash') amt *= 0.5 } // 被ダメ軽減スキル
+    if (this.armorT > 0) amt *= 0.2 // beatdropのスーパーアーマー(-80%)。PlayerCommander/BotCommanderと同等(パリティ)
     this.hp -= amt
     this.world.notifyDamage(this, from, amt)
     if (this.hp <= 0) {
@@ -200,6 +230,12 @@ export class RemoteCommander implements Unit {
     this.chargeState.reset()
     this.chargeLevel = 0
     this.charging = false
+    // PlayerCommander.respawnと項目を揃える: ステルス/スキル状態を死を跨いで残さない。
+    // 残すと、cloak中に死亡→リスポーン直後の赤将を青タレットが索敵しない不公平窓ができる。
+    this.stealthed = false
+    this.skillActiveT = 0
+    this.skillKey = ''
+    this.dashT = 0
     this.group.visible = true
     this.group.position.copy(this.pos)
   }
@@ -288,11 +324,31 @@ export class RemoteCommander implements Unit {
 
     this.integrate(dt)
 
-    // --- 発砲 ---
+    // --- 発砲(player.ts と同一モデル: バースト/オーバードライブのコスト・連射を一致させる) ---
     if (charger) {
       if (chargeFire > 0) this.emitChargedShot(charger, chargeFire, moving)
-    } else if (wantFire && this.fireCd <= 0 && !this.charging && this.energy >= this.weapon.energyCost) {
-      this.emitShot(moving, zoomed, sprinting)
+    } else {
+      const w = this.weapon
+      const od = this.skillKey === 'overdrive' && this.skillActiveT > 0 // 連射+60%・燃費半減
+      const rate = w.rate * (od ? 1.6 : 1)
+      const cost = w.energyCost * (od ? 0.5 : 1)
+      // バースト継続(burstInterval毎に1発)。これが無いとクライアントのリコ等が単発化していた。
+      if (this.burstLeft > 0) {
+        this.burstT -= dt
+        if (this.burstT <= 0) {
+          this.burstT = w.burstInterval ?? 0.07
+          this.burstLeft--
+          this.emitShot(moving, zoomed, sprinting)
+        }
+      }
+      // 発火ゲートは od 込みの実コストで判定(フルコスト判定だとod末尾でローカル予測と1発ズレる)
+      if (wantFire && this.fireCd <= 0 && !this.charging && this.burstLeft <= 0 && this.energy >= cost) {
+        this.energy -= cost
+        this.fireCd = 1 / rate
+        this.lastFireT = 0
+        if (w.burst) { this.burstLeft = w.burst; this.burstT = 0 }
+        else this.emitShot(moving, zoomed, sprinting)
+      }
     }
 
     // 体の向き=視点ヨー(モデル前面 -Z)。歩行アニメ。
@@ -305,10 +361,9 @@ export class RemoteCommander implements Unit {
   private emitShot(moving: boolean, zoomed: boolean, sprinting: boolean) {
     const w = this.weapon
     if (this.invulnT > INVULN_ON_FIRE) this.invulnT = INVULN_ON_FIRE // 発砲でスポーン無敵を解除(無敵撃ち返し封じ)
-    const od = this.skillKey === 'overdrive' && this.skillActiveT > 0 // オーバードライブ: 連射+60%・燃費半減
-    this.fireCd = (1 / w.rate) / (od ? 1.6 : 1)
-    this.energy -= w.energyCost * (od ? 0.5 : 1)
-    this.lastFireT = 0
+    // 発砲でステルス解除(cloak/decoyの「発砲で解除」契約。これが無いとホスト権威の索敵抑制が残り撃ち放題になる)
+    if (this.stealthed) { this.stealthed = false; this.skillActiveT = 0 }
+    // fireCd/energy消費・連射処理は呼び出し側(update発火ゲート/バーストループ)が管理する=player.tsと同一。
     // 視点方向(yaw/pitch)から弾道。射撃元は目の高さから(3人称ボディ)。
     const cp = Math.cos(this.pitch)
     const dir = new THREE.Vector3(-Math.sin(this.yaw) * cp, Math.sin(this.pitch), -Math.cos(this.yaw) * cp)

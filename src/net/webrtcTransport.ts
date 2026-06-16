@@ -70,15 +70,23 @@ export class WebRtcTransport implements NetTransport {
   static host(timeoutMs = 20000): { transport: WebRtcTransport; ready: Promise<string> } {
     const t = new WebRtcTransport('host')
     t.setState('connecting')
+    let idIssued = false // 部屋コード発行済み(=待受開始)か。発行後の回線ゆらぎで部屋を破棄しないための判定
     const ready = new Promise<string>((resolve, reject) => {
       const peer = new Peer(undefined, { config: { iceServers: buildIceServers() } }) // 複数STUN+任意TURNでNAT越え強化。undefinedでid自動発行を維持
       t.peer = peer
       const timer = setTimeout(() => {
-        if (t.state === 'connecting') { t.setState('failed'); t.cleanupPeer(); reject(new Error('timeout')) }
+        if (!idIssued && t.state === 'connecting') { t.setState('failed'); t.cleanupPeer(); reject(new Error('timeout')) }
       }, timeoutMs)
-      peer.on('open', (id) => { clearTimeout(timer); t.roomCode = id; resolve(id) }) // 部屋コード発行(待受開始)
+      peer.on('open', (id) => { idIssued = true; clearTimeout(timer); t.roomCode = id; resolve(id) }) // 部屋コード発行(待受開始)
       peer.on('connection', (conn) => t.bind(conn)) // 参加者が来たら接続を確立
-      peer.on('error', (e) => { clearTimeout(timer); t.setState('failed'); t.cleanupPeer(); reject(e) })
+      peer.on('error', (e) => {
+        // 部屋コード発行前(待受確立前)の error のみ致命=即reject。発行後(参加者待ち中)の network/socket-* は
+        // 一時的な回線ゆらぎなので peer を破棄せず部屋を生かす(従来は無条件 destroy で部屋がサイレント死していた)。
+        if (!idIssued) { clearTimeout(timer); t.setState('failed'); t.cleanupPeer(); reject(e) }
+      })
+      // 待受中にブローカーとのソケットが切れたら(peer は destroy されず disconnected になる)、同じidで再接続を試み
+      // 部屋コードを生かしたまま遅れて来る参加者を受け入れられるようにする。
+      peer.on('disconnected', () => { if (idIssued && t.state === 'connecting') { try { peer.reconnect() } catch { /* noop */ } } })
     })
     return { transport: t, ready }
   }

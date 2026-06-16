@@ -78,11 +78,18 @@ interface Puppet {
   mhp: number
   fill: THREE.Sprite // HPバーの残量(scale.xで増減・色で残量表現)
   fillMat: THREE.SpriteMaterial
+  barGroup: THREE.Group // HPバー親(ステルス中は隠す)
+  stealthMats: { m: THREE.Material; baseOpacity: number }[] // ステルス時に半透明化するモデル素材
+  st: boolean // 現在ステルス中か(snapshotのstを反映)
+  alive: boolean // 前フレームの生存(リスポーン検出=補間バッファ打ち切り用)
   modelKey: string // 採用すべきGLBキー(char_*/token_*)。代替表示からの差し替え判定用
   team: Team // 差し替え時に getModel へ渡す陣営
   kind: string // HPバー再生成用
   placeholder: boolean // 実GLB未ロードで代替(箱)を出しているか。trueの間は実モデルが読めたら差し替える
 }
+
+const STEALTH_OPACITY = 0.13 // ステルス時のpuppet不透明度(BotCommander.setStealthVisualと同値)
+const RESPAWN_JUMP = 5 // この水平距離を超える瞬間移動は補間せず瞬間移動扱い(リスポーンの滑り防止)
 
 /**
  * クライアント側で、受信スナップショットを「見た目専用ユニット(puppet)」に反映する。
@@ -118,12 +125,13 @@ export class PuppetManager {
       let p = this.puppets.get(u.id)
       if (!p) {
         const built = this.buildModelFor(u)
+        const stealthMats = this.collectMats(built.group) // バー追加前にモデル素材だけ収集
         const bar = this.buildHpBar(u.kind)
         built.group.add(bar.group)
         this.group.add(built.group)
         p = {
           group: built.group, buffer: [], seen: this.clock, hp: u.hp, mhp: u.mhp,
-          fill: bar.fill, fillMat: bar.fillMat,
+          fill: bar.fill, fillMat: bar.fillMat, barGroup: bar.group, stealthMats, st: !!u.st, alive: u.alive,
           modelKey: this.keyFor(u), team: u.team, kind: u.kind, placeholder: built.placeholder,
         }
         this.puppets.set(u.id, p)
@@ -133,11 +141,17 @@ export class PuppetManager {
         // 対戦開始時にGLB未ロードで代替(箱)を出していた場合、実モデルが読めたら差し替える(=参加者側で敵が箱のままになる不具合の解消)
         this.tryUpgrade(p)
       }
+      // リスポーン(死→生)や大ジャンプは補間すると死亡地点→基地へ滑って見えるので、バッファを打ち切り瞬間移動にする
+      const last = p.buffer[p.buffer.length - 1]
+      const jumped = (!p.alive && u.alive) || (last && Math.hypot(u.x - last.x, u.z - last.z) > RESPAWN_JUMP)
+      if (jumped) p.buffer.length = 0
       // 受信サンプルをクライアントクロックでスタンプしてバッファへ(update()がinterpDelay分だけ過去を再生)
       p.buffer.push({ t: this.clock, x: u.x, y: u.y, z: u.z, yaw: u.yaw })
       if (p.buffer.length > 8) p.buffer.shift()
       p.seen = this.clock
       p.hp = u.hp; p.mhp = u.mhp
+      p.st = !!u.st
+      p.alive = u.alive
       p.group.visible = u.alive
     }
     // スナップに居ないpuppet(撃破/退場)は削除
@@ -174,12 +188,31 @@ export class PuppetManager {
         if (d < -Math.PI) d += Math.PI * 2
         p.group.rotation.y = a.yaw + d * f
       }
+      // ステルス: モデルを半透明化しHPバーを隠す(cloak/decoyを相手画面でも有効に。decoyは実体側stが無いので薄くならず本体識別が困難になる)
+      const stealth = p.st
+      for (const s of p.stealthMats) {
+        const want = stealth ? STEALTH_OPACITY : s.baseOpacity
+        if (s.m.opacity !== want) { s.m.opacity = want; s.m.needsUpdate = true }
+      }
+      p.barGroup.visible = !stealth
       // HPバー: 残量で幅(中央アンカー)と色(緑→黄→赤)を更新(Spriteは常にカメラ向き。頭上x=z=0で回転に強い)
       const ratio = Math.max(0, Math.min(1, p.mhp > 0 ? p.hp / p.mhp : 0))
       p.fill.scale.x = Math.max(0.001, 1.0 * ratio)
       p.fillMat.color.setRGB(ratio < 0.5 ? 1 : 2 * (1 - ratio), ratio > 0.5 ? 1 : 2 * ratio, 0.15)
       p.group.updateMatrixWorld()
     }
+  }
+
+  /** モデル配下の全マテリアルを収集し透過可能にする(ステルス半透明化用。HPバー追加前に呼ぶこと) */
+  private collectMats(group: THREE.Group): { m: THREE.Material; baseOpacity: number }[] {
+    const out: { m: THREE.Material; baseOpacity: number }[] = []
+    group.traverse((o) => {
+      const mesh = o as THREE.Mesh
+      if (!mesh.isMesh || !mesh.material) return
+      const mats = Array.isArray(mesh.material) ? mesh.material : [mesh.material]
+      for (const m of mats) { m.transparent = true; out.push({ m, baseOpacity: m.opacity ?? 1 }) }
+    })
+    return out
   }
 
   /** 頭上のHPバー(背景＋残量の2スプライト。Spriteは常時カメラを向く) */
@@ -227,6 +260,7 @@ export class PuppetManager {
   private tryUpgrade(p: Puppet) {
     const real = getModel(p.modelKey, p.team)
     if (!real) return // まだ読み込めていない→次のスナップショットで再試行
+    const stealthMats = this.collectMats(real) // 新モデルの素材を収集(バー追加前)
     const bar = this.buildHpBar(p.kind)
     real.add(bar.group)
     real.position.copy(p.group.position)
@@ -237,6 +271,8 @@ export class PuppetManager {
     p.group = real
     p.fill = bar.fill
     p.fillMat = bar.fillMat
+    p.barGroup = bar.group
+    p.stealthMats = stealthMats // 差し替え後もステルス半透明を維持(update が p.st を即反映)
     p.placeholder = false
   }
 
