@@ -725,12 +725,14 @@ class BattleView implements View {
     // 自機(赤将)の権威状態を反映(HP/生存)＋大きくドリフトしたら位置を引き戻す
     // 相手将(青)のHPが下がった=自分が当てた → ヒットマーカー(1v1なのでほぼ自分の戦果。dmgDealt集計も)
     const opp = snap.units.find((u) => u.kind === 'commander' && u.team === 'blue')
-    if (opp) {
+    if (opp && fin(opp.hp)) {
       if (opp.hp < this.lastOppHp && this.lastOppHp < 99999) { this.hud.hitmarker(); sfx.hitmarker(); this.stats.dmgDealt += this.lastOppHp - opp.hp }
       this.lastOppHp = opp.hp
     }
     const me = snap.units.find((u) => u.kind === 'commander' && u.team === 'red')
-    if (me) {
+    // 自機将はingestのisLocalスキップで有限性検証されない(puppet化しないため)。ここで明示検証し、
+    // 非有限フレームは丸ごとスキップ(直前の健全なpos/hp/maxHpを保持)=NaN座標でcamera/フラスタムが壊れ凍結するのを防ぐ。
+    if (me && fin(me.x) && fin(me.z) && fin(me.hp) && fin(me.mhp)) {
       // 被弾フィードバック: HPが下がっていたら被ダメ演出(画面フラッシュ/シェイク)を起動(snapshot直書きだと無音だった)。
       // 閾値0.5: ローカルの自動回復(player.ts)が次snapshotまでに hp を僅かに climb させ me.hp(整数)を上回ると、
       // それを誤って被弾と判定し被弾後6秒間ビネットが点滅+dmgTaken水増ししていた→0.5未満差は無視。
@@ -742,7 +744,7 @@ class BattleView implements View {
       }
       this.player.hp = me.hp
       this.player.maxHp = me.mhp
-      if (me.tp !== undefined) this.player.tp = me.tp // TPはホスト権威(配備可否・HUD表示を一致させる)
+      if (me.tp !== undefined && fin(me.tp)) this.player.tp = me.tp // TPはホスト権威(配備可否・HUD表示を一致させる)。NaNはdeployコストゲートを無効化するので弾く
       if (!me.alive && this.player.alive) {
         this.player.alive = false
         // 死亡→ローカルでリスポーンカウントダウン開始(HUD表示用。実復帰はsnapshotのme.aliveで反映)

@@ -136,11 +136,12 @@ export class WebRtcTransport implements NetTransport {
     this.conn = conn
     conn.on('open', () => { this.setState('open'); onOpen?.() })
     conn.on('data', (d: any) => { if (d && typeof d === 'object' && d.ch) this.msgCb?.(d.ch as NetChannel, d.data) })
-    // close/error時は自分が現役connのときだけスロットを解放する。これが無いと、open前に死んだ初回接続のconnが
-    // this.connに残り、host()の 'connection' ガード(if t.conn)が以降の正規参加者を全拒否=部屋デッドロックになる。
-    // 同一性チェックで、解放後に届く遅延イベントが後続の別connを誤ってnull化することも防ぐ。
-    conn.on('close', () => { if (this.conn === conn) this.conn = null; this.setState('closed') })
-    conn.on('error', () => { if (this.conn === conn) this.conn = null; this.setState('failed') })
+    // close/error時は「自分が現役connのときだけ」スロット解放＋state遷移する(setStateも必ずガード内に置く)。
+    // これが無いと、open前に死んだ初回connの遅延close/errorが、後から確立した別connの対戦中に state を closed/failed へ
+    // 落とし、onStateChangeが誤終了(ロビー強制退出/マッチ確定前終了)させる。同一性チェックで superseded conn の遅延
+    // イベントは state を一切変えない。現役conn死亡時のみ null化+state遷移=2人目再受け入れ設計も維持。
+    conn.on('close', () => { if (this.conn === conn) { this.conn = null; this.setState('closed') } })
+    conn.on('error', () => { if (this.conn === conn) { this.conn = null; this.setState('failed') } })
   }
 
   send(ch: NetChannel, data: unknown): void {

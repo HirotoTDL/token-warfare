@@ -195,6 +195,7 @@ export class PlayerCommander implements Unit {
     this.chargeLevel = 0
     this.charging = false
     this.group.position.copy(this.pos)
+    this.group.rotation.y = this.yaw // 復帰時の初期向きもsnapshotへ正しく載せる(update末尾と対称)
   }
 
   private flatForward() {
@@ -388,6 +389,9 @@ export class PlayerCommander implements Unit {
     this.tp = Math.min(this.tpMax, this.tp + TP_REGEN_BASE * this.tpRegenMul * dt)
 
     this.group.position.copy(this.pos)
+    // 3人称ボディの向きを視点ヨーに同期。これが無いと group.rotation.y=0 のままで、オンライン時に encodeSnapshot が
+    // 自分(青将)のyaw=0を送り続け、相手画面で敵将が常に北向き固定に見える(RemoteCommanderは設定済み=対称化)。
+    this.group.rotation.y = this.yaw
     this.group.updateMatrixWorld()
   }
 
