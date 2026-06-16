@@ -360,6 +360,13 @@ export class RemoteCommander implements Unit {
 
     this.integrate(dt)
 
+    // 発砲より前に体の位置/向きを当フレームへ同期する。muzzleはthis.groupの子なので、これが発砲後だと
+    // emitShotのgetWorldPositionが前フレームのgroup行列を読み、発射元が1フレーム古くなる(player.tsはcamera行列を
+    // emitShot前に更新済み=同フレーム発射)。ここで揃えて host/client の発射元をフレーム一致させる。
+    this.group.position.copy(this.pos)
+    this.group.rotation.y = this.yaw
+    this.group.updateMatrixWorld()
+
     // --- 発砲(player.ts と同一モデル: バースト/オーバードライブのコスト・連射を一致させる) ---
     if (charger) {
       if (chargeFire > 0) this.emitChargedShot(charger, chargeFire, moving)
@@ -392,9 +399,7 @@ export class RemoteCommander implements Unit {
       }
     }
 
-    // 体の向き=視点ヨー(モデル前面 -Z)。歩行アニメ。
-    this.group.position.copy(this.pos)
-    this.group.rotation.y = this.yaw
+    // 歩行アニメ(ポーズ更新)→最終matrix更新(位置/向きは発砲前に同期済み)
     this.updateWalkAnim(dt)
     this.group.updateMatrixWorld()
   }

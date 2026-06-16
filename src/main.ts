@@ -1081,6 +1081,16 @@ const lobbyEl = {
   codeBox: document.getElementById('lobby-code-box')!,
   code: document.getElementById('lobby-code')!,
   codeInput: document.getElementById('lobby-code-input') as HTMLInputElement,
+  spinner: document.querySelector('#lobby-status .lobby-spinner') as HTMLElement,
+}
+/** 接続喪失時: ホスト/参加ボタン(choice)を再表示しつつ、状態パネルにメッセージを出し回転スピナーは止める。
+ *  これが無いと切断後に choice が隠れたまま+スピナー無限回転で、同ロビー内での再ホスト/再参加が不能になる(デッドエンド)。 */
+function lobbyShowReconnect(msg: string) {
+  lobbyEl.choice.classList.remove('hidden') // 再ホスト/再参加を可能にする
+  lobbyEl.status.classList.remove('hidden') // メッセージ表示のため status も出す
+  lobbyEl.codeBox.classList.add('hidden')
+  if (lobbyEl.spinner) lobbyEl.spinner.style.display = 'none' // 接続中でないのに回り続ける誤解を防ぐ
+  lobbyEl.msg.textContent = msg
 }
 let lobbyTransport: WebRtcTransport | null = null
 
@@ -1093,6 +1103,7 @@ function lobbyReset() {
 function lobbyShowStatus(msg: string) {
   lobbyEl.choice.classList.add('hidden')
   lobbyEl.status.classList.remove('hidden')
+  if (lobbyEl.spinner) lobbyEl.spinner.style.display = '' // 再ホスト/再参加時はスピナーを復帰(切断時にnoneにしているため)
   lobbyEl.msg.textContent = msg
 }
 function lobbyCleanup() {
@@ -1134,10 +1145,16 @@ function onNetConnected(transport: NetTransport, role: NetRole) {
   }
   // ready受信(相手の出撃)。出撃前に来ても保持してtryStartで合流する。
   transport.onMessage((ch, data: any) => {
-    if (ch === 'event' && data && data.type === 'ready' && typeof data.char === 'string') {
+    if (ch !== 'event' || !data) return
+    if (data.type === 'ready' && typeof data.char === 'string') {
       oppChar = data.char
       oppMap = typeof data.map === 'string' ? data.map : null
       tryStart()
+    } else if (data.type === 'unready') {
+      // 相手がAFKタイムアウト等で出撃を撤回(キャラ選び直し)→こちらが古い宣言キャラで開始しないよう保留に戻す。
+      // これが無いと「相手の旧キャラで構築→相手は別キャラ」の食い違いが起こりうる。
+      oppChar = null
+      oppMap = null
     }
   })
   // 出撃ボタン(btn-sortie)から呼ばれる: 自分のreadyを送って相手を待つ
@@ -1155,6 +1172,7 @@ function onNetConnected(transport: NetTransport, role: NetRole) {
       if (started) return
       sentReady = false
       committedChar = null
+      try { transport.send('event', { type: 'unready' }) } catch { /* noop */ } // 撤回を相手に通知(古い宣言キャラでの開始を防ぐ)
       setOnlineCharLock(false) // ロスター再解放=キャラ選び直し+再出撃が可能に(デッドエンド解消)
       const sortie = document.getElementById('btn-sortie')!
       sortie.textContent = '相手待ち…再出撃可'; (sortie as HTMLButtonElement).disabled = false
@@ -1173,7 +1191,8 @@ function onNetConnected(transport: NetTransport, role: NetRole) {
       pendingNetSortie = null
       lobbyTransport = null
       showScreen('lobby')
-      lobbyShowStatus('相手との接続が切れました。もう一度ホスト/参加からやり直してください。')
+      // choiceボタンを再表示+スピナー停止で、同ロビー内の再ホスト/再参加を可能にする(旧: lobbyShowStatusでchoiceが隠れ詰み)
+      lobbyShowReconnect('相手との接続が切れました。もう一度ホスト/参加からやり直してください。')
     }
   })
   lobbyShowStatus('P2P接続が確立しました！コマンダーを選んで出撃。')
