@@ -32,10 +32,12 @@ export interface Snapshot {
   score: [number, number] // [blue, red]
   timer: number
   sd?: boolean // サドンデス中か(クライアントのフェーズ告知/HUD表示用。ホスト権威)
+  cores?: { x: number; z: number; s: boolean }[] // フィールドコア(クライアントのミニマップ用。s=小コア)。ホスト権威
+  reveal?: [number, number] // [blue, red] のソナーreveal残り秒(クライアントの敵将ミニマップ点滅+被捕捉警告用)
 }
 
 /** ホストのworld/objectivesから現在のスナップショットを作る(権威側で毎送信フレーム呼ぶ) */
-export function encodeSnapshot(units: Unit[], spheres: number[], score: [number, number], timer: number, t: number, sd = false, cont: boolean[] = []): Snapshot {
+export function encodeSnapshot(units: Unit[], spheres: number[], score: [number, number], timer: number, t: number, sd = false, cont: boolean[] = [], cores: { x: number; z: number; s: boolean }[] = [], reveal: [number, number] = [0, 0]): Snapshot {
   const us: UnitSnap[] = []
   for (const u of units) {
     if (!u.alive && u.kind === 'commander') {
@@ -62,7 +64,8 @@ export function encodeSnapshot(units: Unit[], spheres: number[], score: [number,
       o: u.kind === 'wallpod' ? (u as any).alongX : undefined,
     })
   }
-  return { t, units: us, spheres, cont: cont.some((c) => c) ? cont : undefined, score, timer, sd: sd || undefined }
+  return { t, units: us, spheres, cont: cont.some((c) => c) ? cont : undefined, score, timer, sd: sd || undefined,
+    cores: cores.length ? cores : undefined, reveal: (reveal[0] > 0 || reveal[1] > 0) ? reveal : undefined }
 }
 
 interface Sample {
@@ -250,6 +253,15 @@ export class PuppetManager {
     let n = 0
     for (const p of this.puppets.values()) if (p.team === team && p.kind === kind && p.group.visible) n++
     return n
+  }
+
+  /** ミニマップ描画用に保持中puppetを列挙(クライアントは world.units が自機のみなので、両軍トークン/敵将をこれで供給) */
+  minimapUnits(): { team: Team; kind: string; x: number; z: number; alive: boolean; isCommander: boolean }[] {
+    const out: { team: Team; kind: string; x: number; z: number; alive: boolean; isCommander: boolean }[] = []
+    for (const p of this.puppets.values()) {
+      out.push({ team: p.team, kind: p.kind, x: p.group.position.x, z: p.group.position.z, alive: p.group.visible, isCommander: p.kind === 'commander' })
+    }
+    return out
   }
 
   /** このユニットが採用すべきGLBキー(char_ または token_ 接頭) */

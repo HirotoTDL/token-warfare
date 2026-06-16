@@ -358,6 +358,9 @@ class BattleView implements View {
   private inSeq = 0 // client: 入力連番
   private lastSnap: Snapshot | null = null // client: 直近受信スナップ(未適用)
   private lastOppHp = 99999 // client: 相手将の前回HP(被弾→ヒットマーカー判定用)
+  private clientLastOppAlive = true // client: 相手将の前回生存(撃破バナー/SE/ヒットストップの立ち上がり検出用)
+  private clientCores: { x: number; z: number; small: boolean }[] = [] // client: ミニマップ用コア(snapshot権威)
+  private clientWasRevealed = false // client: 自機(赤)がソナー捕捉された前回状態(被捕捉警告の立ち上がり用)
   private clientSphereOwner: Record<string, Team | null> = {} // client: 各スフィアの前回所有者(確保/被奪取の遷移検出用)
   private clientSpheresSeen = false // client: スフィア所有者を1度記録したか(初回はバナーを鳴らさない)
   private clientDeadCountdown: number | null = null // client: 死亡中のリスポーン残り秒(ローカル推定。実復帰はsnapshotのme.alive)
@@ -654,6 +657,8 @@ class BattleView implements View {
       this.t,
       this.suddenDeath,
       [o.center.contested(), o.base.blue.contested(), o.base.red.contested()], // 係争状態(クライアントは自前導出不可)
+      this.world.cores.map((c) => ({ x: +c.pos.x.toFixed(1), z: +c.pos.z.toFixed(1), s: c.small })), // コア(client minimap用)
+      [+this.world.revealT.blue.toFixed(2), +this.world.revealT.red.toFixed(2)], // ソナーreveal残秒(client敵将点滅+被捕捉警告)
     )
     this.net.transport.send('state', snap)
   }
@@ -707,6 +712,13 @@ class BattleView implements View {
     o.base.blue.snapContested = cont ? !!cont[1] : false
     o.base.red.snapContested = cont ? !!cont[2] : false
     for (const s of o.spheres) s.update(_dt)
+    // ミニマップ用: コアと敵将reveal(ソナー)をホスト権威から反映(clientは権威simが無く自前で持てない)。
+    this.clientCores = (snap.cores ?? []).map((c) => ({ x: c.x, z: c.z, small: c.s }))
+    this.world.revealT.blue = snap.reveal ? snap.reveal[0] : 0 // 敵将(青)reveal=clientが自分のソナーで点滅表示
+    this.world.revealT.red = snap.reveal ? snap.reveal[1] : 0   // 自機(赤)がreveal=被捕捉
+    const redRevealed = this.world.revealT.red > 0
+    if (redRevealed && !this.clientWasRevealed) this.hud.warn('⚠ ソナーで位置を捕捉された!', 2) // ホストのonReveal('red')相当
+    this.clientWasRevealed = redRevealed
     // スフィア確保/被奪取のフィードバックもホストの!isClientブロック限定だった。chargeから所有権遷移を自前検出し、
     // 赤(自分)視点でバナー/SEを鳴らす(redBase=自陣, blueBase=敵陣 と反転。host視点の流用は禁物)。
     for (const s of o.spheres) {
@@ -728,6 +740,11 @@ class BattleView implements View {
     if (opp && fin(opp.hp)) {
       if (opp.hp < this.lastOppHp && this.lastOppHp < 99999) { this.hud.hitmarker(); sfx.hitmarker(); this.stats.dmgDealt += this.lastOppHp - opp.hp }
       this.lastOppHp = opp.hp
+      // 敵将(青)の生存→撃破の遷移で、赤視点の撃破演出(ホストのonKick commander分岐に相当)を鳴らす。clientは権威simが無く欠落していた。
+      if (this.clientLastOppAlive && !opp.alive) {
+        this.hud.killBanner('敵将を撃破!', true); this.hud.feed('敵将を撃破! 占領のチャンス'); sfx.kill() // hitstopはオンラインでは権威simに掛けない方針(pass8)
+      }
+      this.clientLastOppAlive = opp.alive
     }
     const me = snap.units.find((u) => u.kind === 'commander' && u.team === 'red')
     // 自機将はingestのisLocalスキップで有限性検証されない(puppet化しないため)。ここで明示検証し、
@@ -748,6 +765,7 @@ class BattleView implements View {
       this.player.stealthed = !!me.st // 自機ステルスはホスト権威。clientはonSkillでactivateSkillを抑止しローカルでは立たないため、HUD/一人称演出をsnapshotから反映
       if (!me.alive && this.player.alive) {
         this.player.alive = false
+        this.hud.killBanner('やられた…', false); sfx.kill() // 被撃破演出(ホストのonKill commander分岐に相当・clientで欠落していた)
         // 死亡→ローカルでリスポーンカウントダウン開始(HUD表示用。実復帰はsnapshotのme.aliveで反映)
         this.clientDeadCountdown = this.timer <= OVERTIME_AT ? RESPAWN_TIME_OT : RESPAWN_TIME
       } else if (me.alive && !this.player.alive) {
@@ -944,7 +962,9 @@ class BattleView implements View {
         },
         dt,
       )
-      this.hud.minimap.draw(this.world, this.player.pos, this.player.yaw, this.t)
+      // client は world.units が自機のみ・cores空のため、puppet由来の両軍ユニット+snapshotコアを差し込んで描く(盤面情報網の公平化)
+      const miniOverride = this.isClient && this.puppets ? { units: this.puppets.minimapUnits(), cores: this.clientCores } : undefined
+      this.hud.minimap.draw(this.world, this.player.pos, this.player.yaw, this.t, miniOverride)
     }
     if (this.endTimer > 0) {
       this.endTimer -= dt
@@ -1003,13 +1023,16 @@ function startBattle(charKey: string, net: { transport: NetTransport; role: NetR
       // 戦績詳細
       const b = battle!
       const acc = b.player.shotsFired > 0 ? Math.round((b.player.shotsHit / b.player.shotsFired) * 100) : 0
+      // オンラインclient(赤)は権威simを持たず命中/トークン撃破/コア回収を計測できない(world.unitsが自機のみ・onKill/onCore未発火)
+      // ため、0固定の誤表示ではなく '---' にする。与/被ダメはsnapshotから算出できるので表示する。
+      const onlineClient = lastWasOnline && myTeam === 'red'
       document.getElementById('result-stats')!.innerHTML = [
         ['与ダメージ', Math.round(b.stats.dmgDealt)],
         ['被ダメージ', Math.round(b.stats.dmgTaken)],
-        ['命中率', `${acc}%`],
-        ['トークン撃破', b.stats.tokenKills],
+        ['命中率', onlineClient ? '---' : `${acc}%`],
+        ['トークン撃破', onlineClient ? '---' : b.stats.tokenKills],
         ['配備', b.player.deploysCount],
-        ['コア回収', `${b.stats.cores}(+${b.stats.tpEarned}TP)`],
+        ['コア回収', onlineClient ? '---' : `${b.stats.cores}(+${b.stats.tpEarned}TP)`],
       ]
         .map(([k, v]) => `<div class="rs-item"><span>${k}</span><b>${v}</b></div>`)
         .join('')
@@ -1152,6 +1175,7 @@ function onNetConnected(transport: NetTransport, role: NetRole) {
     pendingNetSortie = null
     clearTimeout(selectTimer) // 念のため(既にselect表示済みのはず)
     clearTimeout(readyWaitTimer)
+    clearTimeout(sortieResetTimer) // 出撃ボタンの待機リセットタイマーも解放(stale発火を防ぐ)
     if (role !== 'host' && oppMap) pendingMap = oppMap // ホストのマップに合わせる
     // 送信した ready の char(=committedChar)で必ず出撃する。出撃後にselectedCharが変わっても食い違わない。
     startBattle(committedChar.key, { transport, role, oppCharKey: oppChar })
@@ -1334,8 +1358,9 @@ function doSortie() {
     const sortie = document.getElementById('btn-sortie')!
     sortie.textContent = '相手を待っています…'
     ;(sortie as HTMLButtonElement).disabled = true
+    // 旧: 8秒後に無条件でボタンを活性化していたが、まだ待機中(sentReady=true)なのに押せる見た目になりラベルが約8秒周期で
+    // 点滅していた。リセットは pendingNetSortie 内の readyWaitTimer(30秒→'相手待ち…再出撃可')と onNetConnected 冒頭に一本化。
     clearTimeout(sortieResetTimer)
-    sortieResetTimer = setTimeout(resetSortieButton, 8000) // ハンドル保持: 次セッションのonNetConnectedで確実にクリア/即リセット
   } else {
     startBattle(selectedChar.key)
   }
@@ -1357,6 +1382,8 @@ document.getElementById('btn-rematch')!.addEventListener('click', () => {
     pendingNet = null
     pendingNetSortie = null
     setOnlineCharLock(false) // 出撃時に掛けたロスターロックを解除(再接続後にキャラ変更不能になる回帰を防ぐ)
+    // 終了済BattleViewを破棄してロビーへ。これが無いと死んだ3Dシーン+凍結HUDがロビー裏でRAF描画され続ける(単世代リーク)。
+    view.dispose(); battle = null; view = new MenuView()
     lobbyCleanup()
     lobbyReset()
     showScreen('lobby')

@@ -1,5 +1,11 @@
 import * as THREE from 'three'
 import { World } from './world'
+import type { Team } from './types'
+
+/** ミニマップ描画用の軽量ユニット情報。オンラインclientは world.units を持てない(puppet描画)ため、これで差し込む。 */
+export interface MiniUnit { team: Team; kind: string; x: number; z: number; alive: boolean; isCommander: boolean }
+/** client差し込み用オーバーライド: units=puppet由来の両軍ユニット、cores=snapshot由来のコア。未指定ならworldから描く。 */
+export interface MiniOverride { units: MiniUnit[]; cores: { x: number; z: number; small: boolean }[] }
 
 /**
  * ミニマップ。
@@ -49,16 +55,17 @@ export class Minimap {
     return ((v + half) / (half * 2)) * this.size
   }
 
-  draw(world: World, playerPos: THREE.Vector3, playerYaw: number, time: number) {
+  draw(world: World, playerPos: THREE.Vector3, playerYaw: number, time: number, override?: MiniOverride) {
     const ctx = this.ctx
     const s = this.size
     ctx.clearRect(0, 0, s, s)
     ctx.drawImage(this.staticC, 0, 0)
 
-    // エナジーコア
-    for (const core of world.cores) {
-      const x = this.toMap(core.pos.x)
-      const y = this.toMap(core.pos.z)
+    // エナジーコア(client=override.cores / それ以外=world.cores)
+    const cores = override ? override.cores : world.cores.map((c) => ({ x: c.pos.x, z: c.pos.z, small: c.small }))
+    for (const core of cores) {
+      const x = this.toMap(core.x)
+      const y = this.toMap(core.z)
       ctx.fillStyle = core.small ? '#7dffd0' : '#ffd23e'
       ctx.save()
       ctx.translate(x, y)
@@ -98,11 +105,14 @@ export class Minimap {
       }
     }
 
-    // ユニット(トークンは両軍とも表示。将は原則非表示)
-    for (const u of world.units) {
+    // ユニット(トークンは両軍とも表示。将は原則非表示)。client=override.units(puppet由来)/それ以外=world.units。
+    const units: MiniUnit[] = override
+      ? override.units
+      : world.units.map((u) => ({ team: u.team, kind: u.kind, x: u.group.position.x, z: u.group.position.z, alive: u.alive, isCommander: u.isCommander }))
+    for (const u of units) {
       if (!u.alive) continue
-      const x = this.toMap(u.group.position.x)
-      const y = this.toMap(u.group.position.z)
+      const x = this.toMap(u.x)
+      const y = this.toMap(u.z)
       if (u.isCommander) {
         if (u.team === 'blue') continue // 自分は別描画
         if (world.revealT[u.team] > 0) {
