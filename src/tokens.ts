@@ -363,7 +363,9 @@ class SentryUnit extends TokenUnit {
   private fireCd = 0
 
   constructor(world: World, combat: Combat, sfx: Sfx, team: Team, pos: THREE.Vector3) {
-    super(world, combat, sfx, team, 'sentry', 'セントリー', resolveModel('token_sentry', team, () => buildSentry(team)), pos, 305, 0.55, 1.25)
+    // HP: 迎撃砲台(=約31DPSで撃ち返す防衛拠点)は役割上タンク。#43で汎用と一律×0.76し305まで削ったのは誤り→400へ復帰。
+    // 破壊時間は理論下限(全弾命中・反撃無視)でも約2.2s、反撃で遮蔽を強いられる実戦では更に長い=「2秒で割れる」ことはない。
+    super(world, combat, sfx, team, 'sentry', 'セントリー', resolveModel('token_sentry', team, () => buildSentry(team)), pos, 400, 0.55, 1.25)
     // GLBモデルにはヘッドが無いため、その場合は本体ごと旋回する
     this.head = (this.group.userData.head as THREE.Object3D) ?? this.group
     this.activeT = 1.0 // 設置後1秒は起動待機(配置を読まれる猶予)
@@ -567,7 +569,8 @@ class WallPodUnit extends TokenUnit {
     // 壁は配備者の向きに対して垂直(=正面を塞ぐ)。AABB制約のため軸スナップ
     const d = dir ?? new THREE.Vector3(0, 0, 1)
     const alongX = Math.abs(d.z) >= Math.abs(d.x) // 進行方向がz軸なら壁はx方向に伸びる
-    super(world, combat, sfx, team, 'wallpod', 'ウォールポッド', buildWall(team, alongX), pos, 395, 0.5, 2.2)
+    // HP: ウォールポッドは射線を塞ぐ最重量の構造物(遮蔽)。砲台と同様に#43の一律削減から除外し520へ復帰。
+    super(world, combat, sfx, team, 'wallpod', 'ウォールポッド', buildWall(team, alongX), pos, 520, 0.5, 2.2)
     const w = alongX ? 3 : 0.42
     const dd = alongX ? 0.42 : 3
     this.box = {

@@ -90,8 +90,10 @@ console.log(`敵陣(charge -1)を奪う: -1→+${CAP_THRESHOLD} = ${((1 + CAP_TH
 // 目標(ユーザー指定): トークンを壊すのに「平均1.5秒ほど」。プレイヤーの弾はトークンに全ダメージが入る
 // (対トークン軽減は無い=combat側で確認)。破壊時間 = tokenHP / 撃つ側の peakDPS(有効射程の100%命中、TTKと同基準)。
 // HPは src/tokens.ts のコンストラクタ実値(手動同期)。役割でHPを意図的に差別化している(脆い罠/重い壁等)。
+// ret = トークン自身の反撃DPS(撃ち返す砲台/壁等。tokens.tsの fireBoltAt 実値: dmg/fireCd)。
+// structure=true は迎撃砲台/壁などの防衛構造物=役割上タンク。1.5s目標(汎用トークン)の対象外。
 const TOKENS = [
-  { k: 'gunner', hp: 145, role: '占領供給', std: true },
+  { k: 'gunner', hp: 145, role: '占領供給', std: true, ret: 7 / 0.5 },        // 14DPS(対将は4.9)
   { k: 'striker', hp: 133, role: '突撃', std: true },
   { k: 'chaser', hp: 133, role: '追尾', std: true },
   { k: 'decoy', hp: 160, role: 'おとり', std: true },
@@ -100,28 +102,39 @@ const TOKENS = [
   { k: 'bomber', hp: 236, role: '範囲(やや重)', std: false },
   { k: 'healer', hp: 105, role: '回復(脆)', std: false },
   { k: 'mine', hp: 80, role: '罠(脆・使い捨て)', std: false },
-  { k: 'sniperdrone', hp: 91, role: '狙撃(脆)', std: false },
-  { k: 'sentry', hp: 305, role: '迎撃砲台(重)', std: false },
-  { k: 'wallpod', hp: 395, role: '壁(最重)', std: false },
+  { k: 'sniperdrone', hp: 91, role: '狙撃(脆)', std: false, ret: 18 / 1.7 }, // 10.6DPS
+  // 防衛構造物(撃ち返す/射線を塞ぐ)。汎用1.5s目標の対象外でタンク。#43で一律削減したのを役割相応へ復帰(2026-06-16)。
+  { k: 'sentry', hp: 400, role: '迎撃砲台(重・反撃)', std: false, structure: true, ret: 5 / 0.16 }, // 31.3DPSで撃ち返す
+  { k: 'wallpod', hp: 520, role: '壁(最重・射線封鎖)', std: false, structure: true, ret: 24 / 2.0 }, // 12DPS
 ]
 const peakById = Object.fromEntries(rows.map((r) => [r.k, r.peakDPS]))
 const TOKEN_DESTROY_TARGET = 1.5
-console.log(`\n=== トークン破壊時間(秒) 全武器のpeakDPSで割る。目標: 汎用トークン平均約${TOKEN_DESTROY_TARGET}s ===`)
-console.log('token        HP  最速  平均  最遅   役割')
-let stdSum = 0, stdN = 0, allSum = 0, allN = 0
+console.log(`\n=== トークン破壊時間 ===`)
+console.log('※「破壊時間 = HP ÷ peakDPS」は【理論下限】: 全弾命中・ピーク射程・エネルギー無限・反撃も遮蔽も無視。')
+console.log('  実戦では命中率<100%・距離減衰・そして反撃トークン(retDPS)は遮蔽を強いるため、実破壊時間は下限の何倍にもなる。')
+console.log('  特に迎撃砲台/壁などの防衛構造物(structure)は「正面から数秒で割れる」ことはなく、1.5s目標の対象外=タンク。')
+console.log('')
+console.log('token         HP  最速  平均  最遅  反撃DPS 役割')
+let stdSum = 0, stdN = 0
 for (const tk of TOKENS) {
-  const times = C.map((c) => tk.hp / peakById[c.k]) // 各武器で壊すのに要する秒
+  const times = C.map((c) => tk.hp / peakById[c.k]) // 各武器の理論下限破壊秒
   const min = Math.min(...times), max = Math.max(...times), avg = times.reduce((a, b) => a + b, 0) / times.length
   if (tk.std) { stdSum += avg; stdN++ }
-  allSum += avg; allN++
+  const retStr = tk.ret ? `${tk.ret.toFixed(0).padStart(4)}  ` : '  -   '
   console.log(
-    (tk.std ? '*' : ' ') + tk.k.padEnd(12), String(tk.hp).padStart(3),
-    min.toFixed(2).padStart(5), avg.toFixed(2).padStart(5), max.toFixed(2).padStart(5), '  ', tk.role,
+    (tk.std ? '*' : tk.structure ? '#' : ' ') + tk.k.padEnd(12), String(tk.hp).padStart(3),
+    min.toFixed(2).padStart(5), avg.toFixed(2).padStart(5), max.toFixed(2).padStart(5), retStr, tk.role,
   )
 }
-console.log(`\n全トークンの平均破壊時間 = ${(allSum / allN).toFixed(2)}s  (目標 約${TOKEN_DESTROY_TARGET}s ← ユーザー指定: 全体平均1.5s)`)
-console.log(`汎用トークン(*印=gunner/striker/chaser/decoy)の平均 = ${(stdSum / stdN).toFixed(2)}s`)
-console.log('役割別の相対差は維持(脆い罠は速く/重い構造は遅い)。全体をスケールして平均を目標へ寄せた。')
+console.log(`\n汎用トークン(*=gunner/striker/chaser/decoy)の理論下限・平均 = ${(stdSum / stdN).toFixed(2)}s  (目標 約${TOKEN_DESTROY_TARGET}s ← ユーザー指定の「平均1.5s」はこの汎用群に適用)`)
+console.log('#=防衛構造物(sentry/wallpod): 役割上タンク。反撃で遮蔽を強いるため理論下限すら実戦値ではない。1.5s目標から除外。')
+// 反撃を持つ構造物を「正面から削る」際に攻撃側が被る理論ダメージ(=正面突破のコスト)。
+console.log('\n--- 防衛構造物を正面から削る代償(理論下限時間×反撃DPS=最低でも被るダメージ) ---')
+for (const tk of TOKENS.filter((t) => t.structure)) {
+  const avgFloor = C.reduce((a, c) => a + tk.hp / peakById[c.k], 0) / C.length
+  const fastFloor = tk.hp / Math.max(...C.map((c) => peakById[c.k]))
+  console.log(`${tk.k.padEnd(8)} 理論下限 最速${fastFloor.toFixed(1)}s/平均${avgFloor.toFixed(1)}s、その間に反撃で被弾 ≈ ${(avgFloor * tk.ret).toFixed(0)}dmg(平均) — 正面ソロ撃破は非現実的。遮蔽/横取り/チャージャー(garo)等で対処する設計。`)
+}
 
 // === チャージャー(garo / プリズムレール)詳細 ===
 // スプラトゥーン チャージャー型: トリガー押下で溜め、溜め量fracで威力/弾速/射程が min→max。
