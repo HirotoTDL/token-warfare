@@ -49,6 +49,8 @@ export interface BotParams {
   aimErrInit: number
   /** エイム誤差の収束速度(/s) */
   aimErrDecay: number
+  /** 戦略深度0..1: 高いほど勝敗状況(リード差)・係争・占領を読んで効用最適化する。低Lvは素朴(占領寄りだが適応弱め) */
+  strategyDepth: number
 }
 
 export function botParams(level: number): BotParams {
@@ -68,6 +70,7 @@ export function botParams(level: number): BotParams {
     reaction: lerp(0.9, 0.35, t),
     aimErrInit: lerp(0.3, 0.05, t),
     aimErrDecay: lerp(0.18, 0.55, t),
+    strategyDepth: lerp(0.15, 1.0, t), // 低Lv=ほぼ素朴, 高Lv=勝敗/係争を読む最適戦略
   }
 }
 
@@ -105,6 +108,7 @@ export class BotCommander implements Unit {
   private pi = 0
   private retargetT = 0
   private target: Unit | null = null
+  private capturing = false // 占領射撃中(至近の優先スフィアを撃って確保中)。この間は間合い戦闘の足止めを抑止しスフィアを保持
   private burstLeft = 0
   private burstCd = 1.5
   private fireT = 0
@@ -236,66 +240,105 @@ export class BotCommander implements Unit {
     return e
   }
 
+  // ── 効用ベース戦略AI(移動先=どの行動が今いちばん勝利に資するかをスコア化して最高を選ぶ) ──
+  // 戦闘(acquireTarget/combatUpdate/shoot)は別系統で常時並行=「目標へ動きながら見える敵を撃つ」。
+  // 勝利条件=中央＋敵陣スフィアを確保した間カウント加算。リード差(count差)で攻守の重みを切替えるのが最適性の核。
   private think() {
     const player = this.world.commanderOf(enemyOf(this.team))
     if (!player || !player.alive) return
-    const low = this.hp < this.maxHp * 0.4
     const cps = this.world.coverPoints
     if (!cps.length) return
-    let pick: THREE.Vector3 | null = null
+    const o = this.world.objectives
+    const me = this.team
+    const low = this.hp < this.maxHp * 0.4
+    const sd = this.params.strategyDepth // 0..1 戦略深度(低Lv=適応弱め)
 
-    // すぐ近くにコアがあれば機会的に拾いに行く(レベル3以上)
-    if (this.params.coreSeek && this.tp < 85) {
-      for (const c of this.world.cores) {
-        if (flatDist(c.pos, this.group.position) < 10) {
-          pick = c.pos.clone()
-          break
+    // 勝敗状況: リードしている間は確保した盤面を防衛、ビハインドでは敵スフィアへ攻勢(attacker-defenderメタの定石)。
+    // 戦略深度sdが高いほど強く適応する。
+    const lead = o ? o.count[me] - o.count[enemyOf(me)] : 0
+    const ladj = sd * Math.min(1, Math.abs(lead) / 4)
+    const wCapture = 1 + (lead < 0 ? 0.4 : -0.3) * ladj
+    const wDefend = 1 + (lead > 0 ? 0.4 : -0.3) * ladj
+
+    const center = o ? o.center.pos : new THREE.Vector3()
+    // スフィアへの接近位置: スフィアにLOSが通る最寄りのカバー点を優先する(中央スフィアは構造物が地上の射線を
+    // 完全に遮るため、高所等のLOSが通るカバー点からでないと占領できない)。無ければ幾何的に中央寄り6m
+    // (=敵スフィアの奥=敵スポーンに張り付かない/リスキル回避)へフォールバック。
+    const losEye = new THREE.Vector3()
+    const approach = (sp: { pos: THREE.Vector3 }, isCenter: boolean): THREE.Vector3 => {
+      let best: THREE.Vector3 | null = null, bd = Infinity
+      for (const cp of this.world.coverPoints) {
+        const d = flatDist(cp, sp.pos)
+        if (d > 14 || d < 2) continue
+        losEye.set(cp.x, cp.y + 1.45, cp.z)
+        if (!this.world.hasLOS(losEye, sp.pos)) continue
+        if (d < bd) { bd = d; best = cp }
+      }
+      if (best) return best.clone()
+      const toward = isCenter ? this.group.position : center
+      const dir = toward.clone().sub(sp.pos).setY(0)
+      if (dir.lengthSq() < 1) dir.set(0, 0, me === 'blue' ? 1 : -1)
+      return sp.pos.clone().setY(0).addScaledVector(dir.normalize(), 6)
+    }
+
+    const cands: { util: number; target: THREE.Vector3 }[] = []
+
+    // A) 退避(低HP/チャージ中): 自陣寄り・近接のカバーへ。効用は不利なほど高い。
+    if (low || this.charging) {
+      const base = this.world.basePos[me]
+      let best: THREE.Vector3 | null = null, bd = Infinity
+      for (const p of cps) { const d = flatDist(p, base) + flatDist(p, this.group.position) * 0.4; if (d < bd) { bd = d; best = p } }
+      if (best) cands.push({ util: low ? 0.9 : 0.5, target: best.clone() })
+    }
+
+    // B) 占領(まだ支配していない): 優先スフィア(中央→敵陣→自陣)へ。ビハインドで重み増。
+    if (o && !o.dominating(me)) {
+      const sp = this.priorityCapture()
+      if (sp) {
+        let u = 0.6
+        if (sp === o.center) u += 0.12 // 中央は支配(中央＋敵陣)の前提条件
+        if (sp.contested()) u += 0.12   // 係争中は割り込み価値が高い
+        cands.push({ util: u * wCapture, target: approach(sp, sp === o.center) })
+      }
+    }
+
+    // C) 防衛: 自軍所有スフィアが係争中なら駆けつけて阻止。リードで重み増。
+    if (o) {
+      for (const s of o.spheres) {
+        if (s.owner() === me && s.contested()) {
+          cands.push({ util: 0.55 * wDefend, target: approach(s, s === o.center) })
         }
       }
     }
 
-    // TPが低く、コア回収が許可されていれば最寄りのコアへ
-    if (!pick && !low && this.params.coreSeek && this.tp < 45 && this.world.cores.length) {
-      let bd = Infinity
-      for (const c of this.world.cores) {
-        const d = flatDist(c.pos, this.group.position)
-        if (d < bd) {
-          bd = d
-          pick = c.pos.clone()
-        }
+    // D) コア拾い(coreSeek許可+TP低): 占領が緊急(ビハインド×高戦略)なら抑制。
+    if (this.params.coreSeek && this.world.cores.length) {
+      let nc: THREE.Vector3 | null = null, nd = Infinity
+      for (const c of this.world.cores) { const d = flatDist(c.pos, this.group.position); if (d < nd) { nd = d; nc = c.pos } }
+      if (nc) {
+        let u = this.tp < 45 ? 0.5 : (this.tp < 85 && nd < 10 ? 0.42 : 0)
+        u *= 1 - 0.5 * sd * Math.max(0, -lead) / 4 // ビハインド+高戦略はコアより占領を優先
+        if (u > 0.01) cands.push({ util: u, target: nc.clone() })
       }
-    } else if (low) {
-      const base = this.world.basePos[this.team]
-      let bd = Infinity
-      for (const p of cps) {
-        const d = flatDist(p, base) + flatDist(p, this.group.position) * 0.4
-        if (d < bd) {
-          bd = d
-          pick = p
-        }
-      }
-    } else if (!pick) {
-      // ゾーン制圧: 確保すべきスフィアへ向かう(最優先)。スフィアから少し手前で撃てる位置を狙う。
-      const sp = this.priorityCapture()
-      if (sp) {
-        const dir = this.group.position.clone().sub(sp.pos).setY(0)
-        if (dir.lengthSq() < 1) dir.set(0, 0, this.team === 'blue' ? 1 : -1)
-        pick = sp.pos.clone().setY(0).addScaledVector(dir.normalize(), 6)
-      } else {
-        // 支配中など: 武器の得意距離帯のカバーへ寄る
-        const ideal = this.idealRange()
-        const lo = Math.max(5, ideal - 6)
-        const hi = ideal + 9
-        const cands = cps.filter((p) => {
-          const d = flatDist(p, player.group.position)
-          return d > lo && d < hi
-        })
-        const pool = (cands.length ? cands : cps)
-          .slice()
-          .sort((a, b) => flatDist(a, this.group.position) - flatDist(b, this.group.position))
-          .slice(0, 5)
-        pick = pool[Math.floor(Math.random() * pool.length)] ?? null
-      }
+    }
+
+    // E) 支配中(全確保): 武器の得意距離帯のカバーで敵を待ち受ける防衛布陣。
+    if (o && o.dominating(me)) {
+      const ideal = this.idealRange(), lo = Math.max(5, ideal - 6), hi = ideal + 9
+      const pool = cps.filter((p) => { const d = flatDist(p, player.group.position); return d > lo && d < hi })
+        .sort((a, b) => flatDist(a, this.group.position) - flatDist(b, this.group.position)).slice(0, 5)
+      const t = pool[Math.floor(Math.random() * pool.length)] ?? cps[0]
+      cands.push({ util: 0.55 * wDefend, target: t.clone() })
+    }
+
+    // 最高効用の行動を採用。候補が無ければ得意距離帯のカバーへ(従来フォールバック)。
+    let pick: THREE.Vector3 | null = null, bestU = -Infinity
+    for (const c of cands) { if (c.util > bestU) { bestU = c.util; pick = c.target } }
+    if (!pick) {
+      const ideal = this.idealRange(), lo = Math.max(5, ideal - 6), hi = ideal + 9
+      const pool = cps.filter((p) => { const d = flatDist(p, player.group.position); return d > lo && d < hi })
+        .sort((a, b) => flatDist(a, this.group.position) - flatDist(b, this.group.position)).slice(0, 5)
+      pick = (pool[Math.floor(Math.random() * pool.length)] ?? cps[0]).clone()
     }
     if (pick && (!this.moveTarget || flatDist(pick, this.moveTarget) > 1)) {
       this.moveTarget = pick.clone()
@@ -371,6 +414,23 @@ export class BotCommander implements Unit {
 
   private combatUpdate(dt: number) {
     const t = this.target
+    // 占領優先(勝利条件直結): 至近(≤12m)の優先スフィアが未確保なら、遠い敵を撃つより占領射撃を進める。
+    // ただし至近(≤16m)に敵が居れば交戦を優先(占領中の棒立ち被弾を避ける=最適)。
+    const sp = !this.charging ? this.priorityCapture() : null
+    this.capturing = false
+    // 優先スフィアが射程内(≤28m)かつLOSが通っているなら占領射撃を進める(中央は高所LOS位置からのみ撃てる)。
+    if (sp && flatDist(this.group.position, sp.pos) <= 28 && this.world.hasLOS(this.eye(), sp.pos)) {
+      const threatClose = t && t.alive && !t.stealthed && flatDist(this.group.position, t.group.position) <= 16
+      if (!threatClose) {
+        this.capturing = true // moveUpdateの間合い戦闘を抑止し、スフィア上に留まって占領を進める
+        this.burstLeft = 0
+        const dk = Math.min(1, dt * 6)
+        this.aimYaw += (0 - this.aimYaw) * dk
+        this.aimPitch += (0 - this.aimPitch) * dk
+        this.captureFire(dt)
+        return
+      }
+    }
     if (!t || !t.alive || t.stealthed || this.charging) {
       this.burstLeft = 0
       // エイムレイヤーを中立へ戻す(狙いが無ければ頭/胸を正面へ)
@@ -509,7 +569,7 @@ export class BotCommander implements Unit {
     // 自分の武器が活きる距離でのみ足を止めて撃ち合う。
     // 射程外ならカバー伝いに距離を詰め続ける(超近距離型ほど我慢して詰める)
     const engageThreshold = this.idealRange() < 11 ? 0.8 : 0.55
-    if (t && t.alive && !t.stealthed && t.isCommander && !this.charging &&
+    if (t && t.alive && !t.stealthed && t.isCommander && !this.charging && !this.capturing &&
         this.effectiveAt(flatDist(t.group.position, p)) >= engageThreshold) {
       const d = flatDist(t.group.position, p)
       this.strafeT -= dt
