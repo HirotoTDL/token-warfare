@@ -47,7 +47,7 @@ export function buildSettingsPanel(): HTMLElement {
     <h3>設定</h3>
     <label class="set-row">
       <span>マウス感度</span>
-      <input type="range" min="0.3" max="2.5" step="0.05" data-key="sens" />
+      <input type="range" min="0.1" max="2.5" step="0.02" data-key="sens" />
       <b data-val="sens"></b>
     </label>
     <label class="set-row">
