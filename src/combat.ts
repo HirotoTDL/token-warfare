@@ -160,6 +160,8 @@ export interface BoltOpts {
   gravity?: number
   maxRange?: number
   size?: number
+  /** 貫通弾(チャージャー フルチャージ等): ユニットを貫いて飛び続ける(同一ユニットは一度だけ命中)。壁/スフィアでは停止 */
+  pierce?: boolean
   /** オンラインclient用の見た目専用弾: ユニット命中もスフィア占領も起こさない(ダメージはホスト権威) */
   visual?: boolean
 }
@@ -171,6 +173,7 @@ interface Bolt {
   opts: BoltOpts
   mesh: THREE.Mesh
   alive: boolean
+  hitIds: Set<number> | null // 貫通弾が既に命中したユニットID(再命中防止)。非貫通弾はnull
 }
 
 /** エネルギー弾・爆発・ダメージ処理 */
@@ -222,8 +225,9 @@ export class Combat {
       // プールが空なら1個だけ生成(以降は再利用される)
       const mesh = new THREE.Mesh(this.boltGeo, this.boltMaterial(color))
       this.boltGroup.add(mesh)
-      b = { pos: new THREE.Vector3(), vel: new THREE.Vector3(), traveled: 0, opts, mesh, alive: true }
+      b = { pos: new THREE.Vector3(), vel: new THREE.Vector3(), traveled: 0, opts, mesh, alive: true, hitIds: null }
     }
+    b.hitIds = opts.pierce ? new Set() : null
     b.mesh.material = this.boltMaterial(color)
     b.mesh.visible = true
     b.mesh.position.copy(origin)
@@ -271,6 +275,7 @@ export class Combat {
       if (!b.opts.visual) { // 視覚弾(client再生)はダメージ判定しない(ホスト権威)
         for (const u of this.world.units) {
           if (!u.alive || u.team === b.opts.team || u === b.opts.from) continue
+          if (b.hitIds && b.hitIds.has(u.id)) continue // 貫通弾は同一ユニットに再命中しない
           const up = u.group.position
           const r = u.radius
           const t = rayAabb(b.pos.x, b.pos.y, b.pos.z, dir.x, dir.y, dir.z, up.x - r, up.y, up.z - r, up.x + r, up.y + u.height, up.z + r, step)
@@ -284,13 +289,19 @@ export class Combat {
         const dmg = b.opts.damage * (b.opts.falloff ? falloffMul(b.opts.falloff, dist) : 1)
         if (b.opts.explosive) {
           this.explode(point, b.opts.explosive.radius, dmg, b.opts.team, b.opts.from)
-        } else {
-          this.fx.spark(point, b.opts.color ?? 0xff9060)
-          hitUnit.takeDamage(dmg, b.opts.from)
-          ;(b.opts.from as any)?.onBoltHit?.(hitUnit)
+          this.killBolt(i)
+          continue
         }
-        this.killBolt(i)
-        continue
+        this.fx.spark(point, b.opts.color ?? 0xff9060)
+        hitUnit.takeDamage(dmg, b.opts.from)
+        ;(b.opts.from as any)?.onBoltHit?.(hitUnit)
+        if (b.hitIds) {
+          // 貫通: このユニットを記録して飛び続ける(壁/スフィア/最大射程で停止)
+          b.hitIds.add(hitUnit.id)
+        } else {
+          this.killBolt(i)
+          continue
+        }
       }
       if (obsDist <= step) {
         const point = obs[0].point

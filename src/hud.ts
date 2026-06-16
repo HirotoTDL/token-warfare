@@ -8,6 +8,8 @@ export interface HudState {
   maxHp: number
   energy: number
   charging: boolean
+  /** チャージ武器(garo等): energyは溜め量(0..100)を表す。HUDは溜めバー表示に切替える */
+  charger?: boolean
   tp: number
   tpMax: number
   skillCdLeft: number
@@ -68,12 +70,12 @@ export class HUD {
           <div class="bar hp-bar"><div class="fill" id="h-hp-fill"></div></div>
         </div>
         <div class="energy-row">
-          <span class="energy-label">EN</span>
+          <span class="energy-label" id="h-en-label">EN</span>
           <div class="bar energy-bar"><div class="fill" id="h-en-fill"></div></div>
           <span class="energy-state" id="h-en-state"></span>
         </div>
         <div class="skill-box" id="h-skill">
-          <span class="key">E</span>
+          <span class="key">${keyLabel(keybinds.skill)}</span>
           <span class="skill-name">${char.skill.name}</span>
           <span class="skill-cd" id="h-skill-cd"></span>
         </div>
@@ -98,7 +100,7 @@ export class HUD {
     `
     const ids = ['h-score-blue', 'h-score-red', 'h-timer', 'h-ot', 'h-warn', 'h-hp', 'h-hp-fill',
       'h-sph-blueBase', 'h-sph-center', 'h-sph-redBase',
-      'h-en-fill', 'h-en-state', 'h-skill', 'h-skill-cd', 'h-momentum',
+      'h-en-fill', 'h-en-label', 'h-en-state', 'h-skill', 'h-skill-cd', 'h-momentum',
       'h-tp-fill', 'h-tp', 'h-slots', 'h-feed', 'h-msg', 'h-crosshair', 'h-hitmarker',
       'h-vignette', 'h-stealth', 'h-dead', 'h-dead-count', 'h-minimap-slot', 'h-killbanner', 'h-tip']
     for (const id of ids) this.els[id] = root.querySelector(`#${id}`) as HTMLElement
@@ -109,7 +111,7 @@ export class HUD {
       const el = document.createElement('div')
       el.className = 'slot'
       el.innerHTML = `
-        <span class="key">${i + 1}</span>
+        <span class="key">${keyLabel(keybinds[`deploy${i + 1}` as keyof typeof keybinds])}</span>
         <span class="tname">${def.name}</span>
         <span class="cost">${def.cost}</span>
         <span class="count"></span>
@@ -147,9 +149,23 @@ export class HUD {
     this.els['h-hp-fill'].classList.toggle('low', hpFrac < 0.35)
 
     this.els['h-en-fill'].style.width = `${s.energy}%`
-    this.els['h-en-fill'].classList.toggle('charging', s.charging)
-    this.els['h-en-fill'].classList.toggle('low', s.energy < 25 && !s.charging)
-    this.els['h-en-state'].textContent = s.charging ? 'チャージ中…' : s.energy < 25 ? `${keyLabel(keybinds.charge)}長押しでチャージ` : ''
+    if (s.charger) {
+      // チャージ武器: エネルギーバーを「溜めゲージ」として流用。フルで発光・FULL表示、照準も光らせる
+      const full = s.energy >= 99
+      this.els['h-en-fill'].classList.toggle('charging', s.charging && !full)
+      this.els['h-en-fill'].classList.toggle('full', full)
+      this.els['h-en-fill'].classList.remove('low')
+      this.els['h-en-label'].textContent = '溜'
+      this.els['h-en-state'].textContent = full ? 'FULL! 離して発射' : s.charging ? '溜め中…' : '左クリック長押しで溜め'
+      this.els['h-crosshair'].classList.toggle('charged', full)
+      this.els['h-crosshair'].classList.toggle('charging', s.charging && !full)
+    } else {
+      this.els['h-en-fill'].classList.toggle('charging', s.charging)
+      this.els['h-en-fill'].classList.toggle('low', s.energy < 25 && !s.charging)
+      this.els['h-en-fill'].classList.remove('full')
+      this.els['h-en-label'].textContent = 'EN'
+      this.els['h-en-state'].textContent = s.charging ? 'チャージ中…' : s.energy < 25 ? `${keyLabel(keybinds.charge)}長押しでチャージ` : ''
+    }
 
     this.els['h-tp-fill'].style.width = `${(s.tp / s.tpMax) * 100}%`
     this.els['h-tp'].textContent = `${Math.floor(s.tp)}`

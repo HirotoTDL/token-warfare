@@ -18,7 +18,7 @@ import { HUD } from './hud'
 import { TOKENS } from './tokens'
 import { buildCore, buildMonsterCommander } from './models'
 import { preloadModels, MODEL_MANIFEST, getModel, animateSkeleton, animateGlbBody, setModelQuality } from './modelLoader'
-import { buildSettingsPanel, settings, onSettingsChange } from './settings'
+import { buildSettingsPanel, settings, onSettingsChange, keybinds as kb, keyLabel as kbLabel } from './settings'
 import { simulateMatch, simulateMatrix, summarize } from './sim'
 import { Objectives, CAPTURE_TO_WIN } from './objectives'
 import { DamagePopups } from './dmgpop'
@@ -855,9 +855,10 @@ class BattleView implements View {
       // チュートリアルTIP(文脈に応じて1回ずつ)
       if (this.tipsEnabled) {
         const elapsed = MATCH_TIME - this.timer
-        if (elapsed > 2.5) this.tip('deploy', 'キー1〜4で照準先にトークンを配備して盤面を作ろう')
-        if (elapsed > 12) this.tip('skill', `Eでスキル「${this.player.char.skill.name}」を使える`)
-        if (this.player.energy < 30 && this.player.alive) this.tip('energy', 'エネルギー残量に注意 — R長押しでチャージ(無防備になる)')
+        if (elapsed > 2.5) this.tip('deploy', `${kbLabel(kb.deploy1)}〜${kbLabel(kb.deploy4)}で照準先にトークンを配備して盤面を作ろう`)
+        if (elapsed > 12) this.tip('skill', `${kbLabel(kb.skill)}でスキル「${this.player.char.skill.name}」を使える`)
+        if (!this.player.weapon.charger && this.player.energy < 30 && this.player.alive) this.tip('energy', `エネルギー残量に注意 — ${kbLabel(kb.charge)}長押しでチャージ(無防備になる)`)
+        if (this.player.weapon.charger && elapsed > 6) this.tip('charge', '左クリック長押しで溜め、離して発射。溜め切るほど高威力・超長射程')
         if (this.world.cores.some((c) => !c.small)) this.tip('core', 'フィールドのコア(ミニマップの黄色◆)を回収するとTP+20')
         if (this.player.hp < this.player.maxHp * 0.45 && this.player.alive) this.tip('retreat', 'ピンチの時は遮蔽に隠れて6秒で自動回復が始まる')
       }
@@ -879,8 +880,10 @@ class BattleView implements View {
         {
           hp: this.player.hp,
           maxHp: this.player.maxHp,
-          energy: this.player.energy,
+          // チャージ武器は溜め量(0..1)を energy(0..100)として渡し、HUDを溜めゲージ表示に切替える
+          energy: this.player.weapon.charger ? this.player.chargeLevel * 100 : this.player.energy,
           charging: this.player.charging,
+          charger: !!this.player.weapon.charger,
           tp: this.player.tp,
           tpMax: this.player.tpMax,
           skillCdLeft: this.player.skillCd,

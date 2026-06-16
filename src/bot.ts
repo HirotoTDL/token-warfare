@@ -6,6 +6,7 @@ import { TEAM_COLOR, ENERGY_MAX, TP_REGEN_BASE, INVULN_ON_FIRE, enemyOf, falloff
 import { TOKENS, DecoyUnit, loadoutFor } from './tokens'
 import { buildMonsterCommander } from './models'
 import { getModel, animateGlbBody, animateSkeleton } from './modelLoader'
+import { chargeShotParams } from './chargeWeapon'
 
 // ジャンプ垂直物理(player.tsと同値)。ボットも段差/塔/障害物をジャンプで越えられるようにする。
 const BOT_GRAVITY = 20
@@ -117,6 +118,7 @@ export class BotCommander implements Unit {
   private burstLeft = 0
   private burstCd = 1.5
   private fireT = 0
+  private chargeT = 0 // チャージ武器の溜め経過秒(garo等)
   private deployT = 6
   private skillCd = 3
   private skillActiveT = 0
@@ -183,6 +185,8 @@ export class BotCommander implements Unit {
     this.skillActiveT = 0
     this.invulnT = invuln
     this.regenDelay = 0
+    this.charging = false
+    this.chargeT = 0
     this.moveTarget = null
     this.path = null
     this.target = null
@@ -210,15 +214,18 @@ export class BotCommander implements Unit {
       }
     }
 
-    // エネルギー管理: 切れたらチャージ(射撃停止+鈍足=隙)
-    if (this.charging) {
-      this.energy = Math.min(ENERGY_MAX, this.energy + 55 * dt)
-      if (this.energy > 65) this.charging = false
-    } else if (this.energy < this.char.weapon.energyCost) {
-      this.charging = true
-      this.retreatToCover() // 無防備な間は遮蔽裏へ下がる
-    } else if (this.lastDamaged > 1.5) {
-      this.energy = Math.min(ENERGY_MAX, this.energy + 7 * dt)
+    // エネルギー管理: 切れたらチャージ(射撃停止+鈍足=隙)。
+    // チャージ武器(garo)はエネルギー制を使わず this.charging を「溜め中スロー」フラグとして chargerCombat が占有するため除外。
+    if (!this.char.weapon.charger) {
+      if (this.charging) {
+        this.energy = Math.min(ENERGY_MAX, this.energy + 55 * dt)
+        if (this.energy > 65) this.charging = false
+      } else if (this.energy < this.char.weapon.energyCost) {
+        this.charging = true
+        this.retreatToCover() // 無防備な間は遮蔽裏へ下がる
+      } else if (this.lastDamaged > 1.5) {
+        this.energy = Math.min(ENERGY_MAX, this.energy + 7 * dt)
+      }
     }
 
     // エイム誤差の収束
@@ -456,8 +463,12 @@ export class BotCommander implements Unit {
         return
       }
     }
-    if (!t || !t.alive || t.stealthed || this.charging) {
+    // チャージ武器は溜め中(this.charging)でも戦闘を継続する(溜め自体が戦闘行動)。
+    // 非チャージ武器はエネルギー切れ(this.charging)中は戦闘を降りて遮蔽で回復する。
+    const isCharger = !!this.char.weapon.charger
+    if (!t || !t.alive || t.stealthed || (this.charging && !isCharger)) {
       this.burstLeft = 0
+      if (isCharger) { this.charging = false; this.chargeT = 0 } // 目標を失ったら溜めを解除
       // エイムレイヤーを中立へ戻す(狙いが無ければ頭/胸を正面へ)
       const dk = Math.min(1, dt * 6)
       this.aimYaw += (0 - this.aimYaw) * dk
@@ -485,6 +496,7 @@ export class BotCommander implements Unit {
     this.aimPitch += (wantPitch - this.aimPitch) * ak
 
     const w = this.char.weapon
+    if (w.charger) { this.chargerCombat(dt, t); return } // チャージ武器(garo)は溜め→1撃モデル
     this.fireT -= dt
     if (this.burstLeft > 0) {
       if (this.fireT <= 0) {
@@ -500,6 +512,53 @@ export class BotCommander implements Unit {
         this.burstCd = this.params.burstPause * (0.8 + Math.random() * 0.5)
       }
     }
+  }
+
+  /** チャージ武器の戦闘: 目標を狙いながら溜め、フル(遠距離)/早撃ち(至近)で1撃を放つ。
+   *  最高難易度ほど溜め切って高威力の貫通弾を確実に当てる=狙撃に徹する最適行動。 */
+  private chargerCombat(dt: number, t: Unit) {
+    const cd = this.char.weapon.charger!
+    const dist = flatDist(t.group.position, this.group.position)
+    this.charging = true // 溜め中はスロー&占領射撃を抑止(狙撃に集中)
+    this.fireT -= dt
+    if (this.fireT > 0) return // 発射後の硬直
+    this.chargeT = Math.min(cd.chargeTime, this.chargeT + dt)
+    const frac = this.chargeT / cd.chargeTime
+    // 至近は溜め切らず早撃ちで回避優先、中遠距離はフルチャージで貫通1撃を狙う
+    const wantFrac = dist < 9 ? Math.min(1, cd.minFrac + 0.3) : 1
+    // 難易度が低いほど溜めが甘く威力が出ない(params.dmgMulとは別に溜め精度で表現)
+    const releaseFrac = wantFrac * (0.85 + 0.15 * this.params.dmgMul)
+    if (frac + 1e-3 >= Math.min(1, releaseFrac)) {
+      this.fireCharged(t, Math.max(cd.minFrac, frac))
+      this.chargeT = 0
+      this.fireT = cd.fireRecover + 0.05
+      this.charging = false
+    }
+  }
+
+  private fireCharged(t: Unit, frac: number) {
+    const cd = this.char.weapon.charger!
+    const w = this.char.weapon
+    const p = chargeShotParams(cd, frac)
+    if (this.invulnT > INVULN_ON_FIRE) this.invulnT = INVULN_ON_FIRE
+    if (this.stealthed) this.setStealth(false)
+    const origin = this.eye()
+    const aim = t.group.position.clone()
+    aim.y += t.height * 0.55
+    if (this.params.lead) {
+      const dist = origin.distanceTo(aim)
+      aim.addScaledVector(this.targetVel, dist / p.speed)
+    }
+    const baseDir = aim.sub(origin).normalize()
+    const muzzlePos = this.muzzle.getWorldPosition(new THREE.Vector3())
+    const dir = this.combat.spreadDir(baseDir, this.params.spread * 0.5 + w.spread + this.aimErr)
+    this.combat.fireBolt(muzzlePos.clone(), dir, {
+      damage: p.damage * this.params.dmgMul, team: this.team, from: this, speed: p.speed,
+      color: w.boltColor, maxRange: p.range, pierce: p.pierce, size: 0.1 + p.frac * 0.13,
+    })
+    this.combat.fx.flash(muzzlePos, w.boltColor, 0.12)
+    this.sfx.shotFar(0.16)
+    this.group.userData.recoil = 1
   }
 
   private shoot(t: Unit) {

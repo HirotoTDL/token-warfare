@@ -50,6 +50,23 @@ export function falloffMul(points: FalloffPoint[], dist: number): number {
   return points[points.length - 1].mul
 }
 
+/** チャージ武器(スプラトゥーンのチャージャー型)。トリガー押下で溜め、量に応じ威力/射程/弾速が伸びる。
+ *  威力・射程・弾速は frac∈[minFrac,1] で min→max を線形補間。フル(frac=1)で超長距離1撃。
+ *  エネルギー残量制は使わず「溜め時間」がコスト。これを持つ武器は WeaponDef.charger に設定する。 */
+export interface ChargerDef {
+  chargeTime: number   // 0→フルまでの秒
+  minFrac: number      // これ未満で離すと不発(空溜め)。スプラの最低発射閾値
+  fireRecover: number  // 発射後の硬直(再チャージ不可)秒
+  holdTime: number     // フルチャージを維持できる秒。超過で自動放電(発射)
+  minDamage: number    // minFrac発射の威力
+  maxDamage: number    // フルチャージ威力(1撃)
+  minSpeed: number     // minFracの弾速
+  maxSpeed: number     // フルの弾速(最速=最長到達)
+  minRange: number     // minFracの最大射程(m)
+  maxRange: number     // フルの最大射程(m)。超長距離
+  pierceAtFull: boolean // フルチャージは貫通(トークン越しに将を撃つ)
+}
+
 export interface WeaponDef {
   name: string
   desc: string
@@ -72,6 +89,8 @@ export interface WeaponDef {
   /** 弾にかかる重力(山なり弾道) */
   gravity?: number
   boltColor: number
+  /** 設定するとチャージ武器になる(damage/rate等の通常発射ロジックを置き換える) */
+  charger?: ChargerDef
 }
 
 export interface SkillDef {
@@ -114,14 +133,20 @@ export const CHARACTERS: CharacterDef[] = [
     uniqueToken: 'striker',
   },
   {
-    key: 'garo', name: 'ガロ', gender: 'm', title: '鉄板焼きの壁男', role: 'タンク/制圧',
-    desc: '近距離の鬼。ウォールポッドで地形ごと盤面を書き換える、歩く工事現場。〈射程:近／連射:低／確定2発・KT約0.63s／近接は高威力〉',
-    hp: 140, color: 0x49c46a, subColor: 0xb6ff5c, variant: 1,
+    key: 'garo', name: 'ガロ', gender: 'm', title: '極光を狙うチャージャー', role: '狙撃/制圧',
+    desc: '溜めるほど伸びる極光レール。フルチャージは超長距離の一撃必殺。ウォールポッドで射点を築き盤面を支配する。〈射程:可変(最大≒全マップ)／フルで1撃／溜め1.15s・近接は無力〉',
+    hp: 112, color: 0x49c46a, subColor: 0xb6ff5c, variant: 1,
     weapon: {
-      name: 'ドラムバースト', desc: '6粒拡散の近距離キャノン',
-      damage: 13, pellets: 6, rate: 1.6, energyCost: 12, boltSpeed: 100,
-      falloff: [{ d: 0, mul: 1.3 }, { d: 8, mul: 1 }, { d: 18, mul: 0.58 }, { d: 30, mul: 0.25 }],
-      spread: 0.07, zoomFov: 55, recoil: 0.035, auto: true, boltColor: 0x8aff7a,
+      name: 'プリズムレール', desc: 'チャージ式の極光レール。溜め量で威力と射程が伸び、フルで超長距離1撃',
+      // 通常発射ロジックは使わずcharger側で駆動。damage/rate等は解析ツール/フォールバック用の代表値(=フル相当)。
+      damage: 125, pellets: 1, rate: 0.7, energyCost: 0, boltSpeed: 300,
+      falloff: [{ d: 0, mul: 1 }, { d: 200, mul: 1 }], // チャージ武器は距離減衰なし(射程はcharger.maxRangeで制御)
+      spread: 0.004, zoomFov: 28, recoil: 0.05, auto: true, boltColor: 0x8affea,
+      charger: {
+        chargeTime: 1.15, minFrac: 0.2, fireRecover: 0.22, holdTime: 0.9,
+        minDamage: 16, maxDamage: 125, minSpeed: 130, maxSpeed: 300, minRange: 24, maxRange: 200,
+        pierceAtFull: true,
+      },
     },
     skill: { key: 'dome', name: 'バリアドーム', desc: '2.5秒間 被ダメージ-60%', cooldown: 16, duration: 2.5 },
     uniqueToken: 'wallpod',

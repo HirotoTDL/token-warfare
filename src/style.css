@@ -274,6 +274,8 @@ body {
 .energy-bar .fill { background: linear-gradient(90deg, #ffe066, #ffb02f); }
 .energy-bar .fill.low { background: linear-gradient(90deg, #ff7a50, #ff4030); }
 .energy-bar .fill.charging { background: linear-gradient(90deg, #7dffd0, #29d3e8); animation: pulse 0.5s infinite; }
+/* チャージ武器: 溜め切ると発光して「撃てる」を伝える */
+.energy-bar .fill.full { background: linear-gradient(90deg, #b6ffe6, #8affea); box-shadow: 0 0 10px 2px rgba(138,255,234,0.85); animation: pulse 0.35s infinite; }
 .energy-state { font-size: 11px; color: #ffd9a0; min-width: 110px; }
 .skill-box {
   margin-top: 10px; display: flex; align-items: center; gap: 10px;
@@ -330,6 +332,10 @@ body {
 #h-crosshair i:nth-child(3) { left: -11px; top: -1px; width: 6px; height: 2px; }
 #h-crosshair i:nth-child(4) { left: 5px; top: -1px; width: 6px; height: 2px; }
 #h-crosshair .dot { position: absolute; left: -1px; top: -1px; width: 2px; height: 2px; background: #fff; }
+/* チャージ武器の照準フィードバック: 溜め中は中心ドットが青緑に膨らみ、フルで強く発光 */
+#h-crosshair.charging .dot { background: #7dffd0; box-shadow: 0 0 6px 2px rgba(125,255,208,0.8); width: 4px; height: 4px; left: -2px; top: -2px; }
+#h-crosshair.charged .dot { background: #8affea; box-shadow: 0 0 10px 3px rgba(138,255,234,0.95); width: 6px; height: 6px; left: -3px; top: -3px; animation: pulse 0.35s infinite; }
+#h-crosshair.charged i { background: #8affea; box-shadow: 0 0 6px rgba(138,255,234,0.9); }
 
 #h-hitmarker { position: absolute; left: 50%; top: 50%; width: 0; height: 0; opacity: 0; }
 #h-hitmarker i { position: absolute; width: 9px; height: 2px; background: #ffe070; box-shadow: 0 0 4px rgba(255, 200, 80, 0.9); }

@@ -13,6 +13,7 @@ import { TOKENS, DecoyUnit, loadoutFor } from './tokens'
 import { buildViewmodel } from './models'
 import { getScenery } from './modelLoader'
 import { settings, keybinds, keyLabel, type KeyAction } from './settings'
+import { ChargeState, chargeShotParams } from './chargeWeapon'
 
 const GRAVITY = 20 // 上昇時の基本重力
 const FALL_MULT = 1.7 // 落下時は重力を強めて締まったアーチに(浮わつき防止)
@@ -78,6 +79,9 @@ export class PlayerCommander implements Unit {
   onGround = true
   energy = ENERGY_MAX
   charging = false
+  /** チャージ武器の溜め量 0..1(HUD表示用。非チャージ武器は常に0) */
+  chargeLevel = 0
+  private chargeState = new ChargeState()
   skillCd = 0
   skillActiveT = 0
   tp = 50
@@ -185,6 +189,9 @@ export class PlayerCommander implements Unit {
     this.skillActiveT = 0
     this.invulnT = invuln
     this.regenDelay = 0
+    this.chargeState.reset()
+    this.chargeLevel = 0
+    this.charging = false
     this.group.position.copy(this.pos)
   }
 
@@ -200,20 +207,30 @@ export class PlayerCommander implements Unit {
     this.lastFireT += dt
 
     // --- 視点 ---
-    const zoomed = input.mouseRight && !this.charging
+    // チャージ武器は溜め中にスコープイン(右クリックでも可)。通常武器は従来どおり右クリックADS。
+    const zoomed = w.charger ? (this.charging || input.mouseRight) : (input.mouseRight && !this.charging)
     const sens = 0.0022 * settings.sens * (this.camera.fov / 75)
     this.yaw -= input.mouseDX * sens
     this.pitch -= input.mouseDY * sens
     this.pitch = Math.max(-1.45, Math.min(1.45, this.pitch))
 
-    // --- エネルギーチャージ(Rホールド。無防備) ---
-    this.charging = input.down('charge') && this.energy < ENERGY_MAX - 0.5
-    if (this.charging) {
-      this.energy = Math.min(ENERGY_MAX, this.energy + ENERGY_CHARGE_RATE * dt)
-    } else if (this.lastFireT > ENERGY_PASSIVE_DELAY) {
-      this.energy = Math.min(ENERGY_MAX, this.energy + ENERGY_PASSIVE_RATE * dt)
+    // --- チャージ / エネルギー ---
+    let chargeFire = 0 // チャージ武器: このフレームで発射するなら frac>0
+    if (w.charger) {
+      // トリガー(左クリック)ホールドで溜める。エネルギー残量制は使わない。溜め中は this.charging=移動スロー&構え
+      chargeFire = this.chargeState.step(w.charger, input.mouseDown, dt)
+      this.charging = this.chargeState.level > 0
+      this.chargeLevel = this.chargeState.level
+    } else {
+      // エネルギーチャージ(Rホールド。無防備)
+      this.charging = input.down('charge') && this.energy < ENERGY_MAX - 0.5
+      if (this.charging) {
+        this.energy = Math.min(ENERGY_MAX, this.energy + ENERGY_CHARGE_RATE * dt)
+      } else if (this.lastFireT > ENERGY_PASSIVE_DELAY) {
+        this.energy = Math.min(ENERGY_MAX, this.energy + ENERGY_PASSIVE_RATE * dt)
+      }
+      if (this.energy > 25) this.energyWarned = false
     }
-    if (this.energy > 25) this.energyWarned = false
 
     // --- 移動 ---
     const fwd = this.flatForward()
@@ -321,6 +338,11 @@ export class PlayerCommander implements Unit {
 
     // --- 射撃 ---
     this.fireCd -= dt
+    // チャージ武器: 溜め完了/離した瞬間に1撃。通常のトリガー/エネルギー処理は通さない。
+    if (w.charger) {
+      if (chargeFire > 0) this.emitChargedShot(w.charger, chargeFire, moving, zoomed)
+      // 以降の通常射撃ロジックはスキップ(配備処理へ)
+    } else {
     const od = this.char.skill.key === 'overdrive' && this.skillActiveT > 0
     const rate = w.rate * (od ? 1.6 : 1)
     const cost = w.energyCost * (od ? 0.5 : 1)
@@ -351,6 +373,7 @@ export class PlayerCommander implements Unit {
         this.sfx.denied()
       }
     }
+    } // end 通常射撃(非チャージ武器)
 
     // --- 配備 ---
     for (let i = 0; i < 4; i++) {
@@ -409,6 +432,39 @@ export class PlayerCommander implements Unit {
     this.vmKick = Math.min(0.08, this.vmKick + (heavy ? 0.06 : 0.022))
     // 銃口跳ね上がり: 重い弾ほど大きく跳ねる。位置キックと合わせて「撃った手応え」を出す
     this.vmRotX = Math.min(0.16, this.vmRotX + (heavy ? 0.1 : 0.045))
+  }
+
+  /** チャージ武器の発射(frac=溜め量)。威力/弾速/射程が溜め量で伸び、フルは貫通・超長距離1撃。 */
+  private emitChargedShot(cd: import('./types').ChargerDef, frac: number, moving: boolean, _zoomed: boolean) {
+    const w = this.weapon
+    const p = chargeShotParams(cd, frac)
+    if (this.invulnT > INVULN_ON_FIRE) this.invulnT = INVULN_ON_FIRE
+    if (this.stealthed) { this.stealthed = false; this.skillActiveT = 0; this.onMessage?.('迷彩解除') }
+    const dir = this.camera.getWorldDirection(new THREE.Vector3())
+    // チャージャーは精密。溜め切れていれば散らさず、移動中のみ僅かに散る(立ち撃ち推奨)
+    const spread = w.spread * (moving ? 1.6 : 1) * (1.2 - p.frac * 0.4)
+    const d = this.combat.spreadDir(dir, spread)
+    const muzzlePos = this.muzzle.getWorldPosition(new THREE.Vector3())
+    this.shotsFired++
+    this.combat.fireBolt(muzzlePos.clone(), d, {
+      damage: p.damage,
+      team: this.team,
+      from: this,
+      speed: p.speed,
+      // チャージャーは距離減衰なし(射程内は満額)。射程はmaxRangeで頭打ち。
+      color: w.boltColor,
+      maxRange: p.range,
+      pierce: p.pierce,
+      size: 0.1 + p.frac * 0.13, // 溜めるほど太い極光
+    })
+    this.combat.fx.flash(muzzlePos, w.boltColor, 0.06 + p.frac * 0.06)
+    this.muzzleLight.intensity = 9 + p.frac * 8
+    this.sfx.shot(true)
+    // フルチャージほど強い反動(視覚のみ。自動で戻る)
+    this.recoilP = Math.min(0.18, this.recoilP + (0.05 + p.frac * 0.08))
+    this.recoilY += (Math.random() - 0.5) * 0.03
+    this.vmKick = Math.min(0.1, this.vmKick + 0.04 + p.frac * 0.05)
+    this.vmRotX = Math.min(0.2, this.vmRotX + 0.08 + p.frac * 0.08)
   }
 
   /** 着弾コールバック(combatから) */

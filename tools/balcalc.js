@@ -5,7 +5,9 @@ const ENERGY_MAX = 100, PASSIVE = 7
 const REF_HP = 110 // 平均的な相手HP(キャラHPは95〜140、平均≈110)。確定数/KTの基準
 const C = [
   { k: 'renji', hp: 115, dmg: 23, pel: 1, rate: 8, burst: 1, ecost: 3.2, peak: 1.0, close: 0.85, ease: '中射程/高連射', skill: 'dash -50%dmg 2s/移動' },
-  { k: 'garo', hp: 140, dmg: 13, pel: 6, rate: 1.6, burst: 1, ecost: 12, peak: 1.0, close: 1.3, ease: '近射程/低連射', skill: 'dome -60%dmg 2.5s' },
+  // garo=チャージャー(プリズムレール)。dmg/rateはフル相当の代表値(rate=1/(chargeTime+fireRecover))。詳細はcharger欄+専用セクション参照。
+  { k: 'garo', hp: 112, dmg: 125, pel: 1, rate: 0.73, burst: 1, ecost: 0, peak: 1.0, close: 0.2, ease: 'チャージ式/フルは超長射程1撃', skill: 'dome -60%dmg 2.5s',
+    charger: { chargeTime: 1.15, minFrac: 0.2, fireRecover: 0.22, holdTime: 0.9, minDamage: 16, maxDamage: 125, minSpeed: 130, maxSpeed: 300, minRange: 24, maxRange: 200 } },
   { k: 'jin', hp: 95, dmg: 90, pel: 1, rate: 0.82, burst: 1, ecost: 17, peak: 1.2, close: 0.45, ease: '遠射程/最低連射', skill: 'cloak 4s' },
   { k: 'doku', hp: 110, dmg: 13, pel: 1, rate: 11, burst: 1, ecost: 2.4, peak: 1.0, close: 1.1, ease: '中射程/最高連射', skill: 'heal30' },
   { k: 'mimi', hp: 108, dmg: 10, pel: 2, rate: 9, burst: 1, ecost: 2.5, peak: 1.0, close: 1.1, ease: '近中射程/高連射', skill: 'overdrive rate+60%/燃費半減 2.5s' },
@@ -57,6 +59,13 @@ console.log(`\n=== 確定数(STK) / キルタイム(TTK) 対HP${REF_HP} ===`)
 console.log('char    確定発  KT(s)   扱いやすさ')
 let ktSum = 0, ktN = 0
 for (const c of C) {
+  if (c.charger) {
+    // チャージャー: フル溜め(chargeTime)で1撃。KTは溜め時間=必中前提の理論値。
+    const kt = +c.charger.chargeTime.toFixed(2)
+    ktSum += kt; ktN++
+    console.log(c.k.padEnd(7), '1撃(フル溜)'.padEnd(8), String(kt).padStart(5), '  ', c.ease)
+    continue
+  }
   const t = ttk(c, REF_HP)
   ktSum += t.kt; ktN++
   const stkLabel = c.burst > 1 ? `${t.stkTriggers}バースト(${t.stkTriggers * c.burst}発)` : `${t.stkTriggers}発`
@@ -113,3 +122,31 @@ for (const tk of TOKENS) {
 console.log(`\n全トークンの平均破壊時間 = ${(allSum / allN).toFixed(2)}s  (目標 約${TOKEN_DESTROY_TARGET}s ← ユーザー指定: 全体平均1.5s)`)
 console.log(`汎用トークン(*印=gunner/striker/chaser/decoy)の平均 = ${(stdSum / stdN).toFixed(2)}s`)
 console.log('役割別の相対差は維持(脆い罠は速く/重い構造は遅い)。全体をスケールして平均を目標へ寄せた。')
+
+// === チャージャー(garo / プリズムレール)詳細 ===
+// スプラトゥーン チャージャー型: トリガー押下で溜め、溜め量fracで威力/弾速/射程が min→max。
+// フル(frac=1)は超長距離の1撃。溜め時間(chargeTime)がコスト=高リスク高リターンの狙撃。
+const garo = C.find((c) => c.charger)
+if (garo) {
+  const cd = garo.charger
+  const lerp = (a, b, t) => a + (b - a) * t
+  const at = (frac) => {
+    const f = Math.max(cd.minFrac, Math.min(1, frac))
+    const t = (f - cd.minFrac) / (1 - cd.minFrac)
+    return { frac: f, dmg: lerp(cd.minDamage, cd.maxDamage, t), spd: lerp(cd.minSpeed, cd.maxSpeed, t), rng: lerp(cd.minRange, cd.maxRange, t) }
+  }
+  console.log(`\n=== チャージャー詳細(garo / プリズムレール) ===`)
+  console.log(`溜め時間 0→フル=${cd.chargeTime}s / 発射後硬直=${cd.fireRecover}s / フル維持=${cd.holdTime}s(超過で自動放電)`)
+  console.log('frac   威力   弾速   射程(m)  到達時間(射程÷弾速)')
+  for (const fr of [cd.minFrac, 0.5, 0.75, 1.0]) {
+    const a = at(fr)
+    console.log(`${a.frac.toFixed(2).padStart(4)}  ${a.dmg.toFixed(0).padStart(4)}  ${a.spd.toFixed(0).padStart(5)}  ${a.rng.toFixed(0).padStart(6)}   ${(a.rng / a.spd).toFixed(2)}s`)
+  }
+  const full = at(1)
+  const oneShotList = C.filter((c) => c.hp <= full.dmg).map((c) => `${c.k}(${c.hp})`)
+  const surviveList = C.filter((c) => c.hp > full.dmg).map((c) => `${c.k}(${c.hp})`)
+  console.log(`フル(${full.dmg.toFixed(0)})で1撃確殺: ${oneShotList.join(', ')}`)
+  console.log(`フルでも耐える: ${surviveList.length ? surviveList.join(', ') : 'なし(全員1撃圏内)'}`)
+  console.log(`フルチャージKT(溜め必中前提) ≈ ${cd.chargeTime}s。平均TTK(${(ktSum / ktN).toFixed(2)}s)より遅い=溜めコストで火力を相殺。`)
+  console.log(`近接(frac=${cd.minFrac})威力 ${cd.minDamage} は弱く、間合いを詰められると不利=明確なカウンター(接近)が成立。`)
+}

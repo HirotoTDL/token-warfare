@@ -5,11 +5,12 @@ import { Sfx } from '../sfx'
 import {
   ENERGY_MAX, ENERGY_CHARGE_RATE, ENERGY_PASSIVE_RATE, ENERGY_PASSIVE_DELAY, CHARGE_SPEED_MUL,
   TP_REGEN_BASE, TEAM_COLOR, INVULN_ON_FIRE, enemyOf,
-  type CharacterDef, type Team, type Unit,
+  type CharacterDef, type Team, type Unit, type WeaponDef,
 } from '../types'
 import { buildMonsterCommander } from '../models'
 import { TOKENS, loadoutFor, DecoyUnit } from '../tokens'
 import { getModel, animateSkeleton, animateGlbBody } from '../modelLoader'
+import { ChargeState, chargeShotParams } from '../chargeWeapon'
 import type { NetTransport } from './transport'
 import type { NetInput } from './netInput'
 
@@ -52,6 +53,8 @@ export class RemoteCommander implements Unit {
   onGround = true
   energy = ENERGY_MAX
   charging = false
+  chargeLevel = 0
+  private chargeState = new ChargeState()
   tp = 50
   tpRegenMul = 1
   invulnT = 0
@@ -194,6 +197,9 @@ export class RemoteCommander implements Unit {
     this.energy = ENERGY_MAX
     this.alive = true
     this.invulnT = invuln
+    this.chargeState.reset()
+    this.chargeLevel = 0
+    this.charging = false
     this.group.visible = true
     this.group.position.copy(this.pos)
   }
@@ -222,12 +228,21 @@ export class RemoteCommander implements Unit {
     const wantFire = !!ni && ni.fire
     const wantJump = !!ni && ni.jump
     const wantCharge = !!ni && ni.charge
-    const zoomed = !!ni && ni.zoom && !this.charging
+    const charger = this.weapon.charger
 
-    // --- エネルギー(チャージ=無防備, 非射撃時パッシブ回復) ---
-    this.charging = wantCharge && this.energy < ENERGY_MAX - 0.5
-    if (this.charging) this.energy = Math.min(ENERGY_MAX, this.energy + ENERGY_CHARGE_RATE * dt)
-    else if (this.lastFireT > ENERGY_PASSIVE_DELAY) this.energy = Math.min(ENERGY_MAX, this.energy + ENERGY_PASSIVE_RATE * dt)
+    // --- チャージ / エネルギー(player.ts と同一モデル) ---
+    let chargeFire = 0
+    if (charger) {
+      // チャージ武器: トリガー(fire)ホールドで溜め、離す/フル維持超過で発射。エネルギー制は使わない。
+      chargeFire = this.chargeState.step(charger, wantFire, dt)
+      this.charging = this.chargeState.level > 0
+      this.chargeLevel = this.chargeState.level
+    } else {
+      this.charging = wantCharge && this.energy < ENERGY_MAX - 0.5
+      if (this.charging) this.energy = Math.min(ENERGY_MAX, this.energy + ENERGY_CHARGE_RATE * dt)
+      else if (this.lastFireT > ENERGY_PASSIVE_DELAY) this.energy = Math.min(ENERGY_MAX, this.energy + ENERGY_PASSIVE_RATE * dt)
+    }
+    const zoomed = charger ? this.charging : (!!ni && ni.zoom && !this.charging)
 
     // --- 移動(player.ts と同一モデル) ---
     const fwd = new THREE.Vector3(-Math.sin(this.yaw), 0, -Math.cos(this.yaw))
@@ -274,7 +289,9 @@ export class RemoteCommander implements Unit {
     this.integrate(dt)
 
     // --- 発砲 ---
-    if (wantFire && this.fireCd <= 0 && !this.charging && this.energy >= this.weapon.energyCost) {
+    if (charger) {
+      if (chargeFire > 0) this.emitChargedShot(charger, chargeFire, moving)
+    } else if (wantFire && this.fireCd <= 0 && !this.charging && this.energy >= this.weapon.energyCost) {
       this.emitShot(moving, zoomed, sprinting)
     }
 
@@ -309,6 +326,25 @@ export class RemoteCommander implements Unit {
     }
     this.combat.fx.flash(origin, w.boltColor, 0.05)
     this.sfx.shot(w.energyCost > 10)
+  }
+
+  /** チャージ武器の発射(player.ts と同一モデル)。frac=溜め量で威力/弾速/射程が伸び、フルは貫通1撃。 */
+  private emitChargedShot(cd: NonNullable<WeaponDef['charger']>, frac: number, moving: boolean) {
+    const w = this.weapon
+    const p = chargeShotParams(cd, frac)
+    if (this.invulnT > INVULN_ON_FIRE) this.invulnT = INVULN_ON_FIRE
+    if (this.stealthed) this.stealthed = false
+    const cp = Math.cos(this.pitch)
+    const dir = new THREE.Vector3(-Math.sin(this.yaw) * cp, Math.sin(this.pitch), -Math.cos(this.yaw) * cp)
+    const spread = w.spread * (moving ? 1.6 : 1) * (1.2 - p.frac * 0.4)
+    const d = this.combat.spreadDir(dir, spread)
+    const origin = this.muzzle ? this.muzzle.getWorldPosition(new THREE.Vector3()) : this.pos.clone().setY(this.pos.y + 1.45)
+    this.combat.fireBolt(origin.clone(), d, {
+      damage: p.damage, team: this.team, from: this, speed: p.speed,
+      color: w.boltColor, maxRange: p.range, pierce: p.pierce, size: 0.1 + p.frac * 0.13,
+    })
+    this.combat.fx.flash(origin, w.boltColor, 0.06 + p.frac * 0.06)
+    this.sfx.shot(true)
   }
 
   /** 着弾コールバック(combatから。命中演出/集計はホスト集約) */
