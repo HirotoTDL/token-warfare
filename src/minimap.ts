@@ -55,7 +55,7 @@ export class Minimap {
     return ((v + half) / (half * 2)) * this.size
   }
 
-  draw(world: World, playerPos: THREE.Vector3, playerYaw: number, time: number, override?: MiniOverride) {
+  draw(world: World, playerPos: THREE.Vector3, playerYaw: number, time: number, override?: MiniOverride, selfTeam: Team = 'blue') {
     const ctx = this.ctx
     const s = this.size
     ctx.clearRect(0, 0, s, s)
@@ -114,7 +114,7 @@ export class Minimap {
       const x = this.toMap(u.x)
       const y = this.toMap(u.z)
       if (u.isCommander) {
-        if (u.team === 'blue') continue // 自分は別描画
+        if (u.team === selfTeam) continue // 自機将は別描画(白三角)。陣営ハードコードだとclientで敵将(青)がreveal判定前にスキップされていた
         if (world.revealT[u.team] > 0) {
           // リビール中の敵将: 点滅する大きめマーカー
           const blink = Math.sin(time * 10) > -0.2

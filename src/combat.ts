@@ -305,7 +305,10 @@ export class Combat {
       }
       if (obsDist <= step) {
         const point = obs[0].point
-        if (b.opts.explosive) {
+        if (b.opts.explosive && b.opts.visual) {
+          // 中継された見た目専用の爆発弾: 演出のみ(ダメージ/占領/自機シェイクを起こさない=偽被弾フィードバック防止)
+          this.fx.explosion(this.tmpV.copy(point), b.opts.explosive.radius, b.opts.color ?? 0xff8830); this.sfx.explosion()
+        } else if (b.opts.explosive) {
           const dist = b.traveled + obsDist
           const dmg = b.opts.damage * (b.opts.falloff ? falloffMul(b.opts.falloff, dist) : 1)
           this.explode(point, b.opts.explosive.radius, dmg, b.opts.team, b.opts.from)
@@ -339,8 +342,12 @@ export class Combat {
         // 爆発弾がmaxRange到達(=届かず飛びすぎ)で消える場合は不発にせず着弾点で爆発させる。
         // 場外へ落下(y<-10)した場合は虚空なので爆発しない(PHYS-08: 曲射の不発感を解消)。
         if (b.opts.explosive && b.traveled > maxRange && b.pos.y > 0) {
-          const dmg = b.opts.damage * (b.opts.falloff ? falloffMul(b.opts.falloff, b.traveled) : 1)
-          this.explode(this.tmpV.copy(b.pos), b.opts.explosive.radius, dmg, b.opts.team, b.opts.from)
+          if (b.opts.visual) {
+            this.fx.explosion(this.tmpV.copy(b.pos), b.opts.explosive.radius, b.opts.color ?? 0xff8830); this.sfx.explosion() // 演出のみ(中継視覚弾)
+          } else {
+            const dmg = b.opts.damage * (b.opts.falloff ? falloffMul(b.opts.falloff, b.traveled) : 1)
+            this.explode(this.tmpV.copy(b.pos), b.opts.explosive.radius, dmg, b.opts.team, b.opts.from)
+          }
         }
         this.killBolt(i)
       }

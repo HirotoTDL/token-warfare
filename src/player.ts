@@ -702,6 +702,7 @@ export class PlayerCommander implements Unit {
 
   takeDamage(amount: number, from: Unit | null) {
     if (!this.alive || this.invulnT > 0) return
+    if (!(amount > 0)) return // 0以下/NaNは無視(中継視覚弾のdamage=0等で偽の被弾演出を出さない二重防御)
     let d = amount
     const sk = this.char.skill.key
     if (sk === 'dash' && this.skillActiveT > 0) d *= 0.5

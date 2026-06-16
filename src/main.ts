@@ -964,7 +964,7 @@ class BattleView implements View {
       )
       // client は world.units が自機のみ・cores空のため、puppet由来の両軍ユニット+snapshotコアを差し込んで描く(盤面情報網の公平化)
       const miniOverride = this.isClient && this.puppets ? { units: this.puppets.minimapUnits(), cores: this.clientCores } : undefined
-      this.hud.minimap.draw(this.world, this.player.pos, this.player.yaw, this.t, miniOverride)
+      this.hud.minimap.draw(this.world, this.player.pos, this.player.yaw, this.t, miniOverride, this.player.team)
     }
     if (this.endTimer > 0) {
       this.endTimer -= dt
