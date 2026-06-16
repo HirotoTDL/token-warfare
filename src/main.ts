@@ -1217,6 +1217,11 @@ function onNetConnected(transport: NetTransport, role: NetRole) {
       if (!started && !sentReady && lastSentChar) {
         sentReady = true
         committedChar = lastSentChar
+        // 可視選択も実出撃キャラ(lastSentChar)へ揃える。撤回中に別キャラを選び直していると、出撃は
+        // lastSentChar なのに画面はそのキャラのロック表示のまま=表示と実出撃の食い違いになる。ロック前に
+        // selectCharacter を呼ぶ(ロック後は onlineCharLocked 早期returnで無効)ことで selectedChar/プレビュー/.sel を一致させる。
+        const lsi = CHARACTERS.findIndex((cc) => cc.key === lastSentChar!.key)
+        if (lsi >= 0) selectCharacter(lastSentChar, lsi)
         setOnlineCharLock(true)
         try { transport.send('event', { type: 'ready', char: committedChar.key, map: pendingMap }) } catch { /* noop */ }
       }
