@@ -4,6 +4,51 @@ import type { NetTransport, NetChannel, NetRole, NetState } from './transport'
 // WebRTC DataChannel トランスポート(PeerJS無償ブローカーでシグナリング)。NetTransportを実装し、
 // LoopbackTransportと差し替え可能。ホストは部屋コード(=peer id)を発行、参加者はコードで接続する。
 // GitHub Pages(静的)だけで動作し、サーバ常駐不要。設計は docs/NETCODE_DESIGN.md。
+
+type IceServer = { urls: string | string[]; username?: string; credential?: string }
+
+// 信頼できる無償の公開STUNサーバ群。複数列挙して1台障害時の冗長性とNAT越え成功率を高める。
+// STUNは「自分の外側アドレス/ポートを教えてもらう」だけで、料金・認証不要・常駐サーバ不要。
+const FREE_STUN_SERVERS: IceServer[] = [
+  { urls: 'stun:stun.l.google.com:19302' },
+  { urls: 'stun:stun1.l.google.com:19302' },
+  { urls: 'stun:stun2.l.google.com:19302' },
+  { urls: 'stun:stun.cloudflare.com:3478' },
+  { urls: 'stun:global.stun.twilio.com:3478' },
+]
+
+/**
+ * Peerに渡すiceServers配列を構築する。基本は無償STUNのみ。
+ * TURN差し込みスロット: 実行時 window.__twTurn か ビルド時定数(VITE_TW_TURN, JSON文字列)があれば末尾に連結する。
+ * どちらも無ければ何も足さず無害にSTUNのみ返す(有償TURNはここでは同梱しない)。Symmetric NAT同士の越えにはTURNが要るが、
+ * その認証情報はコミットせず実行時注入する設計(漏洩回避)。window.__twTurn は単一オブジェクト/配列どちらも受け付ける。
+ *   例: window.__twTurn = { urls: 'turn:turn.example.com:3478', username: 'u', credential: 'p' }
+ */
+function buildIceServers(): IceServer[] {
+  const servers: IceServer[] = [...FREE_STUN_SERVERS]
+  const extra: IceServer[] = []
+  // (a) 実行時注入スロット: window.__twTurn
+  try {
+    const w = typeof window !== 'undefined' ? (window as any).__twTurn : undefined
+    if (Array.isArray(w)) extra.push(...w)
+    else if (w && typeof w === 'object') extra.push(w)
+  } catch { /* window未定義等は無害にスキップ */ }
+  // (b) ビルド時定数スロット: VITE_TW_TURN(TURN設定のJSON文字列)。未設定/不正は無害にスキップ。
+  try {
+    const raw = (import.meta as any)?.env?.VITE_TW_TURN
+    if (typeof raw === 'string' && raw.trim()) {
+      const parsed = JSON.parse(raw)
+      if (Array.isArray(parsed)) extra.push(...parsed)
+      else if (parsed && typeof parsed === 'object') extra.push(parsed)
+    }
+  } catch { /* 未設定/不正JSONは無害にスキップ */ }
+  // urls を持つ有効なエントリだけ採用(壊れた注入で接続自体を壊さない)
+  for (const e of extra) {
+    if (e && (typeof e.urls === 'string' ? e.urls : Array.isArray(e.urls) && e.urls.length)) servers.push(e)
+  }
+  return servers
+}
+
 export class WebRtcTransport implements NetTransport {
   readonly role: NetRole
   state: NetState = 'idle'
@@ -26,7 +71,7 @@ export class WebRtcTransport implements NetTransport {
     const t = new WebRtcTransport('host')
     t.setState('connecting')
     const ready = new Promise<string>((resolve, reject) => {
-      const peer = new Peer()
+      const peer = new Peer(undefined, { config: { iceServers: buildIceServers() } }) // 複数STUN+任意TURNでNAT越え強化。undefinedでid自動発行を維持
       t.peer = peer
       const timer = setTimeout(() => {
         if (t.state === 'connecting') { t.setState('failed'); t.cleanupPeer(); reject(new Error('timeout')) }
@@ -47,7 +92,7 @@ export class WebRtcTransport implements NetTransport {
     const t = new WebRtcTransport('client')
     t.setState('connecting')
     const connected = new Promise<void>((resolve, reject) => {
-      const peer = new Peer()
+      const peer = new Peer(undefined, { config: { iceServers: buildIceServers() } }) // 複数STUN+任意TURNでNAT越え強化。undefinedでid自動発行を維持
       t.peer = peer
       const timer = setTimeout(() => {
         if (t.state !== 'open') { t.setState('failed'); t.cleanupPeer(); reject(new Error('timeout')) }
