@@ -76,3 +76,39 @@ const CAPTURE_RATE = 0.18, CAP_THRESHOLD = 0.55
 console.log(`\n=== スフィア占領(武器非依存) ===`)
 console.log(`占領レート ${CAPTURE_RATE}/s → 0→占領(${CAP_THRESHOLD}) = ${(CAP_THRESHOLD / CAPTURE_RATE).toFixed(1)}s (全武器一律)`)
 console.log(`敵陣(charge -1)を奪う: -1→+${CAP_THRESHOLD} = ${((1 + CAP_THRESHOLD) / CAPTURE_RATE).toFixed(1)}s (相殺・ペナルティ除く理論値)`)
+
+// === トークン破壊時間(プレイヤーがトークンを壊すのに要する秒) ===
+// 目標(ユーザー指定): トークンを壊すのに「平均1.5秒ほど」。プレイヤーの弾はトークンに全ダメージが入る
+// (対トークン軽減は無い=combat側で確認)。破壊時間 = tokenHP / 撃つ側の peakDPS(有効射程の100%命中、TTKと同基準)。
+// HPは src/tokens.ts のコンストラクタ実値(手動同期)。役割でHPを意図的に差別化している(脆い罠/重い壁等)。
+const TOKENS = [
+  { k: 'gunner', hp: 190, role: '占領供給', std: true },
+  { k: 'striker', hp: 175, role: '突撃', std: true },
+  { k: 'chaser', hp: 175, role: '追尾', std: true },
+  { k: 'decoy', hp: 210, role: 'おとり', std: true },
+  { k: 'jammer', hp: 240, role: '妨害(中)', std: false },
+  { k: 'booster', hp: 280, role: '支援(やや重)', std: false },
+  { k: 'bomber', hp: 310, role: '範囲(やや重)', std: false },
+  { k: 'healer', hp: 140, role: '回復(脆)', std: false },
+  { k: 'mine', hp: 105, role: '罠(脆・使い捨て)', std: false },
+  { k: 'sniperdrone', hp: 120, role: '狙撃(脆)', std: false },
+  { k: 'sentry', hp: 400, role: '迎撃砲台(重)', std: false },
+  { k: 'wallpod', hp: 520, role: '壁(最重)', std: false },
+]
+const peakById = Object.fromEntries(rows.map((r) => [r.k, r.peakDPS]))
+const TOKEN_DESTROY_TARGET = 1.5
+console.log(`\n=== トークン破壊時間(秒) 全武器のpeakDPSで割る。目標: 汎用トークン平均約${TOKEN_DESTROY_TARGET}s ===`)
+console.log('token        HP  最速  平均  最遅   役割')
+let stdSum = 0, stdN = 0
+for (const tk of TOKENS) {
+  const times = C.map((c) => tk.hp / peakById[c.k]) // 各武器で壊すのに要する秒
+  const min = Math.min(...times), max = Math.max(...times), avg = times.reduce((a, b) => a + b, 0) / times.length
+  if (tk.std) { stdSum += avg; stdN++ }
+  const flag = tk.std && Math.abs(avg - TOKEN_DESTROY_TARGET) > 0.5 ? '  ← 汎用なのに目標から乖離' : ''
+  console.log(
+    (tk.std ? '*' : ' ') + tk.k.padEnd(12), String(tk.hp).padStart(3),
+    min.toFixed(2).padStart(5), avg.toFixed(2).padStart(5), max.toFixed(2).padStart(5), '  ', tk.role + flag,
+  )
+}
+console.log(`\n汎用トークン(*印=gunner/striker/chaser/decoy)の平均破壊時間 = ${(stdSum / stdN).toFixed(2)}s  (目標 約${TOKEN_DESTROY_TARGET}s)`)
+console.log('脆い罠(mine/sniperdrone/healer)は意図的に速く、重い構造(sentry/wallpod)は意図的に遅い=役割別HP設計。')
