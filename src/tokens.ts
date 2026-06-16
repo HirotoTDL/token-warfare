@@ -564,6 +564,7 @@ class WallPodUnit extends TokenUnit {
   private box: AABB
   private deployed = false
   private deployT = 1.0 // 0.35→1.0: 壁が射線/経路を塞ぐまで1秒。配置を読まれる猶予(起動ディレイ統合)
+  readonly alongX: boolean // 壁の向き(x軸沿いに伸びるか)。オンラインのpuppetが同じ向きで組むためsnapshotで送る
 
   constructor(world: World, combat: Combat, sfx: Sfx, team: Team, pos: THREE.Vector3, dir?: THREE.Vector3) {
     // 壁は配備者の向きに対して垂直(=正面を塞ぐ)。AABB制約のため軸スナップ
@@ -571,6 +572,7 @@ class WallPodUnit extends TokenUnit {
     const alongX = Math.abs(d.z) >= Math.abs(d.x) // 進行方向がz軸なら壁はx方向に伸びる
     // HP: ウォールポッドは射線を塞ぐ最重量の構造物(遮蔽)。砲台と同様に#43の一律削減から除外し520へ復帰。
     super(world, combat, sfx, team, 'wallpod', 'ウォールポッド', buildWall(team, alongX), pos, 520, 0.5, 2.2)
+    this.alongX = alongX
     const w = alongX ? 3 : 0.42
     const dd = alongX ? 0.42 : 3
     this.box = {

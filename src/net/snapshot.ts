@@ -1,6 +1,7 @@
 import * as THREE from 'three'
 import type { Team, Unit } from '../types'
 import { getModel } from '../modelLoader'
+import { buildProceduralUnit } from '../models'
 
 // ホスト権威simの状態をクライアントへ送る差分なしスナップショット(~20Hz)。
 // クライアントはこれを PuppetManager で「見た目だけのユニット」に反映する(権威simは回さない)。
@@ -20,6 +21,7 @@ export interface UnitSnap {
   alive: boolean
   st?: boolean // stealthed
   tp?: number // 将のTP(クライアントの自機TP HUDを権威化)
+  o?: boolean // wallpodの向き(x軸沿いに伸びるか=alongX)。クライアントが壁を正しい向きで組むために送る
 }
 
 export interface Snapshot {
@@ -55,6 +57,7 @@ export function encodeSnapshot(units: Unit[], spheres: number[], score: [number,
       alive: u.alive,
       st: u.stealthed || undefined,
       tp: u.isCommander ? Math.round((u as any).tp ?? 0) : undefined,
+      o: u.kind === 'wallpod' ? (u as any).alongX : undefined,
     })
   }
   return { t, units: us, spheres, score, timer, sd: sd || undefined }
@@ -207,24 +210,17 @@ export class PuppetManager {
     return u.kind === 'commander' || u.kind === 'decoy' ? `char_${u.ck ?? 'renji'}` : `token_${u.kind}`
   }
 
-  /** 実GLBがあればそれを、未ロードなら代替の箱を返す(placeholder=true) */
+  /**
+   * 実GLBがあればそれを、無ければホストと同一のプロシージャル・モデルを返す(placeholder=実GLB未使用)。
+   * 以前は代替として「色付きの箱」を出していたが、token_sentry/wallpod/mine はGLBが存在せずホストは
+   * プロシージャル組み立てで描くため、クライアントだけ箱になっていた(=参加者側でトークンが四角い不具合)。
+   * buildProceduralUnit でホストの resolveModel fallback と同じ見た目を出して解消する。
+   * GLBを持つトークンが未ロードの間も一旦プロシージャルで描き、読めたら tryUpgrade でGLBへ差し替える。
+   */
   private buildModelFor(u: UnitSnap): { group: THREE.Group; placeholder: boolean } {
     const m = getModel(this.keyFor(u), u.team)
     if (m) return { group: m, placeholder: false }
-    return { group: this.fallbackBox(u.kind, u.team), placeholder: true }
-  }
-
-  /** 種別が分かる簡易プレースホルダ(GLB未ロード/未知kind時)。実モデルが後で読めれば tryUpgrade で差し替える */
-  private fallbackBox(kind: string, team: Team): THREE.Group {
-    const g = new THREE.Group()
-    const h = kind === 'commander' || kind === 'decoy' ? 1.7 : 0.8
-    const box = new THREE.Mesh(
-      new THREE.BoxGeometry(0.6, h, 0.6),
-      new THREE.MeshStandardMaterial({ color: team === 'blue' ? 0x3da8ff : 0xff5040 }),
-    )
-    box.position.y = h / 2
-    g.add(box)
-    return g
+    return { group: buildProceduralUnit(u.kind, u.team, u.ck, u.o !== false), placeholder: true }
   }
 
   /** 代替表示中のpuppetを、実GLBが読み込めたら本物に差し替える(transform/可視/HPバーを引き継ぐ) */

@@ -1212,14 +1212,18 @@ CHARACTERS.forEach((c, idx) => {
   thumb.style.setProperty('--cc', colorHex)
   thumb.innerHTML = `<span class="rt-frame"><img src="art/portrait_${c.key}.png" alt="${c.name}" loading="lazy" /></span><span class="rt-name">${c.name}</span>`
   thumb.addEventListener('click', () => { sfx.unlock(); selectCharacter(c, idx) })
-  thumb.addEventListener('dblclick', () => { sfx.unlock(); startBattle(c.key) })
+  // ダブルクリック=このキャラを選んで出撃。オンライン中はdoSortieがready交換を通す(直接startBattleしない)。
+  thumb.addEventListener('dblclick', () => { selectCharacter(c, idx); doSortie() })
   thumb.addEventListener('mouseenter', () => { if (view instanceof MenuView) view.focusChar(idx) })
   thumb.addEventListener('mouseleave', () => { if (view instanceof MenuView) view.focusChar(selectedIdx) })
   rosterRoot.appendChild(thumb)
   rosterThumbs.push(thumb)
 })
 
-document.getElementById('btn-sortie')!.addEventListener('click', () => {
+// 出撃処理(出撃ボタンとサムネのダブルクリックで共有)。
+// 重要: オンライン接続中(pendingNet)は必ず ready 交換を通す。直接 startBattle(net無し) を呼ぶと
+// オフラインCPU戦が即開始し「片方だけ試合が始まる/CPUと対戦」バグになるため、入口を1本化する。
+function doSortie() {
   sfx.unlock()
   if (pendingNet && pendingNetSortie) {
     pendingNetSortie() // オンライン: ready交換→双方揃ったら開始
@@ -1230,7 +1234,8 @@ document.getElementById('btn-sortie')!.addEventListener('click', () => {
   } else {
     startBattle(selectedChar.key)
   }
-})
+}
+document.getElementById('btn-sortie')!.addEventListener('click', doSortie)
 selectCharacter(CHARACTERS[0], 0) // 初期選択
 
 document.getElementById('btn-start')!.addEventListener('click', () => {

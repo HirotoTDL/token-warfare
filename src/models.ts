@@ -1,5 +1,5 @@
 import * as THREE from 'three'
-import { TEAM_COLOR, type CharacterDef, type Team } from './types'
+import { TEAM_COLOR, characterByKey, type CharacterDef, type Team } from './types'
 
 /** プリミティブ合成でモデルを組み立てるビルダー */
 class B {
@@ -451,5 +451,33 @@ export function buildViewmodel(char: CharacterDef): THREE.Group {
     o.receiveShadow = false
   })
   g.userData.muzzle = muzzle
+  return g
+}
+
+/** kind→プロシージャル組み立て関数(GLB不在/未ロード時のフォールバック)。 */
+const PROC_TOKEN_BUILDERS: Record<string, (team: Team) => THREE.Group> = {
+  gunner: buildGunner, sentry: buildSentry, healer: buildHealDrone, striker: buildStriker,
+  mine: buildSpiderMine, booster: buildBooster, chaser: buildChaser, bomber: buildBomber,
+  jammer: buildJammer, sniperdrone: buildSniperDrone,
+}
+
+/**
+ * 表示専用のプロシージャル・モデルを組む(実GLBが無い/未ロードのときのフォールバック)。
+ * ホストの resolveModel(getModel ?? buildX) の「buildX」側と同一の組み立てなので、クライアントの
+ * puppet でもホストとまったく同じ見た目になる(箱で代替しない)。
+ * token_sentry / token_wallpod / token_mine はGLBが存在せず常にこの経路を通るため特に重要。
+ * @param wallAlongX wallpod の向き(x軸沿いに伸びるか)。snapshot の o から復元する。
+ */
+export function buildProceduralUnit(kind: string, team: Team, charKey?: string, wallAlongX = true): THREE.Group {
+  if (kind === 'commander') return buildMonsterCommander(characterByKey(charKey ?? 'renji'), team)
+  if (kind === 'decoy') return buildDecoy(characterByKey(charKey ?? 'renji'), team)
+  if (kind === 'wallpod') return buildWall(team, wallAlongX)
+  const builder = PROC_TOKEN_BUILDERS[kind]
+  if (builder) return builder(team)
+  // 未知kind(本来到達しない)の最終手段
+  const g = new THREE.Group()
+  const box = new THREE.Mesh(new THREE.BoxGeometry(0.6, 0.8, 0.6), new THREE.MeshStandardMaterial({ color: TEAM_COLOR[team] }))
+  box.position.y = 0.4
+  g.add(box)
   return g
 }
