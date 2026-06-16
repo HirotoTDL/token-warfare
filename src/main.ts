@@ -17,7 +17,7 @@ import { BotCommander, botParams } from './bot'
 import { HUD } from './hud'
 import { TOKENS } from './tokens'
 import { buildCore, buildMonsterCommander } from './models'
-import { preloadModels, MODEL_MANIFEST, getModel, animateSkeleton, animateGlbBody, setModelQuality } from './modelLoader'
+import { preloadModels, MODEL_MANIFEST, getModel, animateSkeleton, animateGlbBody, setModelQuality, isSharedResource } from './modelLoader'
 import { buildSettingsPanel, settings, onSettingsChange, keybinds as kb, keyLabel as kbLabel } from './settings'
 import { simulateMatch, simulateMatrix, summarize } from './sim'
 import { Objectives, CAPTURE_TO_WIN } from './objectives'
@@ -102,12 +102,15 @@ function showScreen(name: keyof typeof screens | null) {
 function disposeScene(scene: THREE.Scene) {
   scene.traverse((o) => {
     const mesh = o as THREE.Mesh
-    if (mesh.geometry) mesh.geometry.dispose()
+    // 共有GLBキャッシュ由来(geometry/material/texture)は破棄しない=永続。破棄すると再戦/メニュー往復ごとに
+    // GPU再アップロードのヒッチが出る(getModel/getSceneryのcloneは参照共有)。per-cloneのリングやプロシージャル資源だけ破棄。
+    if (mesh.geometry && !isSharedResource(mesh.geometry)) mesh.geometry.dispose()
     const mat = mesh.material as THREE.Material | THREE.Material[] | undefined
     const mats = Array.isArray(mat) ? mat : mat ? [mat] : []
     for (const m of mats) {
+      if (isSharedResource(m)) continue // 共有マテリアル(scenery)はテクスチャごと残す
       const sm = m as THREE.MeshStandardMaterial
-      sm.map?.dispose()
+      if (sm.map && !isSharedResource(sm.map)) sm.map.dispose() // getModelのclone材質が参照する共有テクスチャは残す
       m.dispose()
     }
   })
@@ -1744,6 +1747,24 @@ window.addEventListener('resize', () => {
     const hostFinishedAtSec = +((host as any).t).toFixed(2)
     host.dispose()
     return { ok: clientRecovered && hostRecovered, clientRecovered, hostRecovered, clientFinishedAtSec, hostFinishedAtSec }
+  },
+  // 共有GLBリソースのdispose回避検証(改善#6)。GLB geometry=共有(disposeScene skip=再upload回避)、per-cloneのリング/
+  // getModelのclone材質=非共有(破棄される)、disposeSceneがGLBシーンでthrowしない、を確認する。
+  glbCacheTest() {
+    const m = getModel('char_renji', 'blue')
+    if (!m) return { ok: false, reason: 'char_renji not loaded' }
+    let glbGeo: any = null, ringGeo: any = null, glbMat: any = null
+    m.traverse((o: any) => {
+      if (!o.isMesh) return
+      if (o.geometry?.type === 'TorusGeometry') ringGeo = o.geometry // per-cloneのチームリング
+      else { if (!glbGeo) glbGeo = o.geometry; if (!glbMat && o.material && !Array.isArray(o.material)) glbMat = o.material }
+    })
+    const glbGeoShared = !!glbGeo && isSharedResource(glbGeo) // 共有=disposeScene が破棄しない(再uploadヒッチ回避)
+    const ringNotShared = !!ringGeo && !isSharedResource(ringGeo) // per-clone=破棄される(正しい)
+    const clonedMatNotShared = !!glbMat && !isSharedResource(glbMat) // getModelは材質cloneするので非共有=破棄(正しい)
+    let threw = false
+    try { const sc = new THREE.Scene(); sc.add(m); disposeScene(sc) } catch { threw = true }
+    return { ok: glbGeoShared && ringNotShared && clonedMatNotShared && !threw, glbGeoShared, ringNotShared, clonedMatNotShared, threw }
   },
   // 相手切断=残存側の不戦勝(WIN確定・誤LOSE/DRAW防止)の検証(改善#10)。マッチ中にclientが退出→host側 onStateChange が
   // closed を拾い oppForfeited=true+finish() し、結果がスコアに依らずWINになる(リーバー逃げ得防止)。

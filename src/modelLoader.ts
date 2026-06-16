@@ -13,6 +13,25 @@ import { TEAM_COLOR, type Team } from './types'
  * 正規化: 高さを目標値に自動スケール、足元を原点、+Z前方を想定。
  */
 const cache = new Map<string, THREE.Group | null>()
+// 共有GLBリソース集合(geometry/material/texture)。getModel/getSceneryのcloneはこれらを参照共有するため、
+// disposeSceneが破棄すると再戦/メニュー往復ごとにGPU再アップロードのヒッチが出る。isSharedResourceで判定し破棄を回避する。
+// WeakSetなのでuserData伝播(Material.cloneがコピー)の誤爆が無く、per-cloneの新規材質(getModelのclone材質/リング)は含まれない。
+const sharedResources = new WeakSet<object>()
+/** disposeScene用: このgeometry/material/textureは共有GLBキャッシュ由来(破棄禁止=永続)か。 */
+export function isSharedResource(o: object | null | undefined): boolean { return !!o && sharedResources.has(o) }
+const TEX_SLOTS = ['map', 'normalMap', 'roughnessMap', 'metalnessMap', 'emissiveMap', 'aoMap', 'alphaMap'] as const
+function markShared(root: THREE.Object3D) {
+  root.traverse((o) => {
+    const mesh = o as THREE.Mesh
+    if (!mesh.isMesh) return
+    if (mesh.geometry) sharedResources.add(mesh.geometry)
+    const mats = Array.isArray(mesh.material) ? mesh.material : mesh.material ? [mesh.material] : []
+    for (const m of mats) {
+      sharedResources.add(m)
+      for (const slot of TEX_SLOTS) { const t = (m as any)[slot]; if (t) sharedResources.add(t) }
+    }
+  })
+}
 const loader = new GLTFLoader()
 // 最適化済みGLB(meshopt圧縮)を読むためにデコーダを登録
 loader.setMeshoptDecoder(MeshoptDecoder)
@@ -46,6 +65,7 @@ function normalize(scene: THREE.Object3D, targetHeight: number): THREE.Group {
   const root = new THREE.Group()
   root.add(scene)
   root.userData.skinned = skinned
+  markShared(root) // キャッシュ元のgeometry/material/textureを共有資源として登録(disposeSceneでの破棄回避)
   return root
 }
 
