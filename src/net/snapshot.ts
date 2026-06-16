@@ -120,9 +120,14 @@ export class PuppetManager {
 
   /** スナップショット受信時: puppetの目標transformを更新し、居なくなったidは削除 */
   ingest(snap: Snapshot) {
+    if (!snap || !Array.isArray(snap.units)) return // 不正スナップは丸ごと破棄
     const present = new Set<number>()
     for (const u of snap.units) {
       if (this.isLocal(u)) continue
+      // 非信頼peer(host)由来の座標を検証: NaN/Infをpuppet行列に入れるとThREEのフラスタムカリングが壊れ画面が凍結する。
+      // client→host(input/fire)と同じ「不正フレームは捨てる」方針をstateにも適用(非有限ユニットはスキップ=残留もさせない)。
+      if (!Number.isFinite(u.x) || !Number.isFinite(u.y) || !Number.isFinite(u.z) || !Number.isFinite(u.yaw) ||
+          !Number.isFinite(u.hp) || !Number.isFinite(u.mhp)) continue
       present.add(u.id)
       let p = this.puppets.get(u.id)
       if (!p) {

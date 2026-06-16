@@ -667,10 +667,16 @@ class BattleView implements View {
     const snap = this.lastSnap
     if (!snap) return
     this.lastSnap = null
-    this.puppets?.ingest(snap)
-    this.scores.blue = snap.score[0]
-    this.scores.red = snap.score[1]
-    this.timer = snap.timer
+    this.puppets?.ingest(snap) // ingest側でユニット単位の有限性を検証済み
+    // 非信頼peer(host)由来のスカラ群も検証: 不正な配列/NaNでスコア/タイマー/スフィアや勝敗判定が壊れないよう、
+    // 有限値のときだけ反映する(client→host方向と同じ「不正は捨てる」方針をstateにも適用)。
+    const fin = (v: any) => typeof v === 'number' && Number.isFinite(v)
+    const sc = snap.score, sp = snap.spheres
+    const scoreOk = Array.isArray(sc) && fin(sc[0]) && fin(sc[1])
+    const sphOk = Array.isArray(sp) && fin(sp[0]) && fin(sp[1]) && fin(sp[2])
+    if (scoreOk) { this.scores.blue = sc[0]; this.scores.red = sc[1] }
+    if (fin(snap.timer)) this.timer = snap.timer
+    if (!scoreOk || !sphOk) return // スコア/スフィアが壊れたフレームは以降の演出・勝敗判定をスキップ(直前の健全値を保持)
     // 試合フェーズ(OT/サドンデス)の告知はホスト権威simの中だけで鳴っていてクライアントに来ていなかった。
     // snapshotのtimer/sdから遷移を検出し、クライアントでも告知バナー+BGM+SEを鳴らす(HUDのOT/SD表示もthis.suddenDeathに依存)。
     const wasSudden = this.suddenDeath
@@ -1215,7 +1221,7 @@ document.getElementById('lobby-host')!.addEventListener('click', () => {
     lobbyEl.codeBox.classList.remove('hidden')
     lobbyEl.code.textContent = code
     lobbyEl.msg.textContent = '合言葉を相手に伝えて待機中…'
-  }).catch((e) => { lobbyEl.msg.textContent = lobbyErrMsg(e, false) })
+  }).catch((e) => { lobbyCleanup(); lobbyShowReconnect(lobbyErrMsg(e, false)) }) // 失敗時もchoice再表示+スピナー停止(行き止まり回避)
   transport.onStateChange((s) => { if (s === 'open') onNetConnected(transport, 'host') })
 })
 document.getElementById('lobby-join')!.addEventListener('click', () => {
@@ -1226,7 +1232,7 @@ document.getElementById('lobby-join')!.addEventListener('click', () => {
   const { transport, connected } = WebRtcTransport.join(code)
   lobbyTransport = transport
   connected.then(() => onNetConnected(transport, 'client'))
-    .catch((e) => { lobbyEl.msg.textContent = lobbyErrMsg(e, true) })
+    .catch((e) => { lobbyCleanup(); lobbyShowReconnect(lobbyErrMsg(e, true)) }) // 合言葉ミス/相手不在/タイムアウト時もchoice再表示+スピナー停止
 })
 document.getElementById('lobby-copy')!.addEventListener('click', () => {
   const code = lobbyEl.code.textContent ?? ''
