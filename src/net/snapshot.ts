@@ -47,7 +47,8 @@ export function encodeSnapshot(units: Unit[], spheres: number[], score: [number,
       id: u.id,
       kind: u.kind,
       team: u.team,
-      ck: (u as any).char?.key,
+      ck: (u as any).char?.key ?? (u as any).charKey, // 将=char.key / デコイ=charKey(偽装元)。デコイが常にレンジ姿になる不具合の解消
+
       x: +p.x.toFixed(2),
       y: +p.y.toFixed(2),
       z: +p.z.toFixed(2),
@@ -236,6 +237,13 @@ export class PuppetManager {
   /** id→puppetの現在HP等(HUD/ヘルスバー用に必要なら拡張)。今は本体位置のみ。 */
   has(id: number) {
     return this.puppets.has(id)
+  }
+
+  /** team/kind の生存puppet数(クライアントのトークンスロットHUD用。自配備トークンはworld.units外でpuppetとして保持されるため) */
+  countActive(team: Team, kind: string): number {
+    let n = 0
+    for (const p of this.puppets.values()) if (p.team === team && p.kind === kind && p.group.visible) n++
+    return n
   }
 
   /** このユニットが採用すべきGLBキー(char_ または token_ 接頭) */

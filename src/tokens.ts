@@ -809,9 +809,11 @@ class SniperDroneUnit extends TokenUnit {
 /** デコイ(リコのスキル等で出現する将の偽物) */
 export class DecoyUnit extends TokenUnit {
   private lifeT = 6
+  readonly charKey: string // 偽装元キャラ。オンラインpuppetが同じ姿で描けるよう snapshot の ck として送る
 
   constructor(world: World, combat: Combat, sfx: Sfx, team: Team, pos: THREE.Vector3, char: CharacterDef, yaw: number) {
     super(world, combat, sfx, team, 'decoy', 'デコイ', resolveModel(`char_${char.key}`, team, () => buildDecoy(char, team)), pos, 160, 0.45, 1.8)
+    this.charKey = char.key
     this.group.rotation.y = yaw
   }
 

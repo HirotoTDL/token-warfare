@@ -905,7 +905,9 @@ class BattleView implements View {
           deadCountdown: this.isClient ? this.clientDeadCountdown : (this.respawnT.blue ?? null),
           slots: this.player.loadout.map((k) => ({
             def: TOKENS[k],
-            count: this.world.countActive('blue', k),
+            // 自陣トークンの稼働数。クライアントは自配備トークンがworld.units外のpuppetなのでPuppetManagerから数える
+            // (従来は'blue'固定+world.units参照で、client赤側が常に0/maxになりスロット表示が壊れていた)。
+            count: this.isClient && this.puppets ? this.puppets.countActive(this.player.team, k) : this.world.countActive(this.player.team, k),
             affordable: this.player.tp >= TOKENS[k].cost,
           })),
           spheres: this.objectives.spheres.map((sp) => ({
@@ -1098,16 +1100,19 @@ function lobbyErrMsg(e: any, joining: boolean): string {
 /** 接続確立 → キャラ選択へ。出撃時に ready{char,map} を交換し、双方揃ったらオンライン対戦を開始する。 */
 function onNetConnected(transport: NetTransport, role: NetRole) {
   pendingNet = { transport, role }
+  setOnlineCharLock(false) // 新規接続=毎回ロスターを解錠(前セッションのロック残留や再戦経路の取りこぼしを一掃)
   let sentReady = false
   let oppChar: string | null = null
   let oppMap: string | null = null
   let started = false
   let committedChar: CharacterDef | null = null // ready送信時に確定したキャラ。以降の選択変更に左右されない
+  let readyWaitTimer: ReturnType<typeof setTimeout> | undefined // 相手の出撃待ちタイムアウト(AFK時のデッドエンド回避)
   const tryStart = () => {
     if (started || !sentReady || !oppChar || !committedChar) return
     started = true
     pendingNetSortie = null
     clearTimeout(selectTimer) // 念のため(既にselect表示済みのはず)
+    clearTimeout(readyWaitTimer)
     if (role !== 'host' && oppMap) pendingMap = oppMap // ホストのマップに合わせる
     // 送信した ready の char(=committedChar)で必ず出撃する。出撃後にselectedCharが変わっても食い違わない。
     startBattle(committedChar.key, { transport, role, oppCharKey: oppChar })
@@ -1128,12 +1133,24 @@ function onNetConnected(transport: NetTransport, role: NetRole) {
     setOnlineCharLock(true)
     transport.send('event', { type: 'ready', char: committedChar.key, map: pendingMap })
     tryStart()
+    // 相手が一定時間出撃しない(AFK/グリーフ)場合、ロックを解いてキャラ選び直し+再出撃を可能にする(デッドエンド回避)。
+    // この時点でまだ started=false=相手は未出撃(=こちらをそのキャラで構築していない)ので、宣言キャラを変えても整合する。
+    clearTimeout(readyWaitTimer)
+    readyWaitTimer = setTimeout(() => {
+      if (started) return
+      sentReady = false
+      committedChar = null
+      setOnlineCharLock(false) // ロスター再解放=キャラ選び直し+再出撃が可能に(デッドエンド解消)
+      const sortie = document.getElementById('btn-sortie')!
+      sortie.textContent = '相手待ち…再出撃可'; (sortie as HTMLButtonElement).disabled = false
+    }, 30000)
   }
   // ロビー中(キャラ選択〜出撃前)に相手が切断したら、無限待ちにせずロビーへ戻して通知する。
   // 対戦開始後は BattleView 側が onStateChange を上書きして自前で終了処理する(役割交代)。
   transport.onStateChange((s) => {
     if ((s === 'closed' || s === 'failed') && !started) {
       clearTimeout(selectTimer) // 未発火のselect遷移を止める(切断通知のロビー画面を上書きさせない=オフラインCPU戦化を防ぐ)
+      clearTimeout(readyWaitTimer)
       setOnlineCharLock(false) // ロスターロック解除(次の対戦/オフラインに備える)
       pendingNet = null
       pendingNetSortie = null
@@ -1181,6 +1198,9 @@ document.getElementById('lobby-copy')!.addEventListener('click', () => {
 })
 document.getElementById('btn-lobby-back')!.addEventListener('click', () => {
   sfx.unlock()
+  clearTimeout(selectTimer) // open窓で戻る場合の未発火select遷移を止める
+  // 接続確立直後(open)に戻ると lobbyCleanup の open ガードでは閉じられず接続が孤立する→明示close(backToMenuと同手当て)
+  if (pendingNet) { try { pendingNet.transport.close() } catch { /* noop */ } }
   lobbyCleanup()
   pendingNet = null
   pendingNetSortie = null
@@ -1274,8 +1294,10 @@ document.getElementById('btn-rematch')!.addEventListener('click', () => {
   sfx.unlock()
   if (lastWasOnline) {
     // オンライン対戦の再戦: P2P接続は終了済みなので、黙ってオフライン戦を始めず再接続のためロビーへ戻す。
+    if (pendingNet) { try { pendingNet.transport.close() } catch { /* noop */ } } // open残存接続を明示close(ゾンビpeerリーク防止)
     pendingNet = null
     pendingNetSortie = null
+    setOnlineCharLock(false) // 出撃時に掛けたロスターロックを解除(再接続後にキャラ変更不能になる回帰を防ぐ)
     lobbyCleanup()
     lobbyReset()
     showScreen('lobby')

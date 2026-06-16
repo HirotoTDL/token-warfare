@@ -9,7 +9,8 @@ export interface NetInput {
   mz: number // 移動 前(+)/後(-) [-1..1]  ※W=+1,S=-1
   yaw: number // 視点ヨー(rad)
   pitch: number // 視点ピッチ(rad, 上+)
-  fire: boolean // 発砲(押下中)
+  fire: boolean // 発砲(押下中=オートマ武器のホールド判定用)
+  firePressed?: boolean // 発砲の立ち上がりエッジ(このフレームでクリック)。セミオート武器(auto:false)の単発判定用
   charge: boolean // エネルギーチャージ(Rホールド)
   jump: boolean // ジャンプ(押下中)
   zoom: boolean // ズーム(右クリック)
@@ -34,6 +35,7 @@ export function sampleNetInput(input: Input, yaw: number, pitch: number, seq: nu
     yaw,
     pitch,
     fire: input.mouseDown,
+    firePressed: input.mousePressed || undefined, // クリックの立ち上がり(セミオート用)。falseは送らず帯域節約
     charge: input.down('charge'),
     jump: input.down('jump'),
     zoom: input.mouseRight,

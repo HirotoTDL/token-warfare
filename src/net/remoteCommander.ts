@@ -62,6 +62,7 @@ export class RemoteCommander implements Unit {
   private skillActiveT = 0
   private skillKey = ''
   private armorT = 0
+  private regenDelay = 0 // 被弾後この秒数はHP回復しない(PlayerCommanderと同一の自動回復モデル)
 
   private world: World
   private combat: Combat
@@ -211,6 +212,7 @@ export class RemoteCommander implements Unit {
     if (this.skillActiveT > 0) { if (this.skillKey === 'dome') amt *= 0.4; else if (this.skillKey === 'dash') amt *= 0.5 } // 被ダメ軽減スキル
     if (this.armorT > 0) amt *= 0.2 // beatdropのスーパーアーマー(-80%)。PlayerCommander/BotCommanderと同等(パリティ)
     this.hp -= amt
+    this.regenDelay = 6 // 被弾で回復遅延を再武装(PlayerCommander.takeDamageと同一)
     this.world.notifyDamage(this, from, amt)
     if (this.hp <= 0) {
       this.alive = false
@@ -236,6 +238,7 @@ export class RemoteCommander implements Unit {
     this.skillActiveT = 0
     this.skillKey = ''
     this.dashT = 0
+    this.regenDelay = 0 // 復帰時は回復待ちを残さない(PlayerCommander.respawnと対称)
     this.group.visible = true
     this.group.position.copy(this.pos)
   }
@@ -248,6 +251,9 @@ export class RemoteCommander implements Unit {
     this.skillCd = Math.max(0, this.skillCd - dt)
     this.armorT = Math.max(0, this.armorT - dt)
     this.tp = Math.min(100, this.tp + TP_REGEN_BASE * this.tpRegenMul * dt) // 配備用TP回復(コア回収はupdateCores経由)
+    // 被弾後のパッシブHP回復(PlayerCommanderと同一: 6秒の遅延後 10/s)。これが無いとclient赤将だけ永久に回復せず一方的に不利だった
+    if (this.regenDelay > 0) this.regenDelay -= dt
+    else this.hp = Math.min(this.maxHp, this.hp + 10 * dt)
     // スキル持続の終了処理(cloak/decoyのステルス解除)
     if (this.skillActiveT > 0) {
       this.skillActiveT -= dt
@@ -341,8 +347,11 @@ export class RemoteCommander implements Unit {
           this.emitShot(moving, zoomed, sprinting)
         }
       }
-      // 発火ゲートは od 込みの実コストで判定(フルコスト判定だとod末尾でローカル予測と1発ズレる)
-      if (wantFire && this.fireCd <= 0 && !this.charging && this.burstLeft <= 0 && this.energy >= cost) {
+      // オート武器=ホールド(wantFire)、セミオート(auto:false=ジン/ナナセ)=クリックの立ち上がりエッジ(firePressed)で判定。
+      // player.ts:358 と同一(これが無いとホスト権威でセミオートがフルオート連射し、オンライン限定で実DPSが跳ね上がっていた)。
+      const trigger = w.auto ? wantFire : !!(ni && ni.firePressed)
+      if (trigger && this.fireCd <= 0 && !this.charging && this.burstLeft <= 0 && this.energy >= cost) {
+        if (ni && !w.auto) ni.firePressed = false // セミオートのエッジを消費(同一入力フレームの再利用で二重発射しない)
         this.energy -= cost
         this.fireCd = 1 / rate
         this.lastFireT = 0
