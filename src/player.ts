@@ -189,6 +189,7 @@ export class PlayerCommander implements Unit {
     this.alive = true
     this.stealthed = false
     this.skillActiveT = 0
+    this.dashT = 0 // ダッシュ中に死亡→復帰直後に幻のダッシュが継続するのを防ぐ(RemoteCommander.respawn と対称)
     this.invulnT = invuln
     this.regenDelay = 0
     this.chargeState.reset()
@@ -245,7 +246,7 @@ export class PlayerCommander implements Unit {
     if (input.down('left')) wish.sub(right)
     const moving = wish.lengthSq() > 0
     if (moving) wish.normalize()
-    const sprinting = input.down('sprint') && input.down('forward') && !zoomed && !this.charging
+    const sprinting = input.down('sprint') && input.down('forward') && !input.down('back') && !zoomed && !this.charging // !back: host側の mz>0 判定(=前進かつ後退でない)と等価に揃える(W+S同時押し時の乖離防止)
     let speed = sprinting ? 8.5 : 6
     if (zoomed) speed *= 0.55
     if (this.charging) speed *= CHARGE_SPEED_MUL
@@ -289,7 +290,7 @@ export class PlayerCommander implements Unit {
         this.stealthed = false
       }
     }
-    if (input.hit('skill') && this.skillCd <= 0) this.activateSkill(moving ? wish : fwd)
+    if (input.hit('skill') && this.skillCd <= 0) this.activateSkill()
 
     // --- カメラ更新 ---
     const stepRate = sprinting ? 13 : 10
@@ -548,15 +549,15 @@ export class PlayerCommander implements Unit {
     )
   }
 
-  private activateSkill(dir: THREE.Vector3) {
+  private activateSkill() {
     const s = this.char.skill
     this.skillCd = s.cooldown
     this.skillActiveT = s.duration
     this.sfx.skill()
-    // dash の移動成分(dashT/dashDir)だけは onSkill 抑止の前にローカル適用する。dashはステルス/HP等の権威状態に
-    // 影響しない純移動なので、clientでローカル予測してもhost権威と一致する。これが無いとhostの24m/sダッシュ毎に
-    // client自機が drift>3m でハードスナップ(瞬間移動)していた。skillCd/skillActiveT は上で進めるので二重発火しない。
-    if (s.key === 'dash') { this.dashT = 0.16; this.dashDir.copy(dir).setY(0).normalize() }
+    // dash の移動成分(dashT/dashDir)だけは onSkill 抑止の前にローカル適用する(ステルス/HP等の権威状態には不干渉)。
+    // 方向は【前方固定】: 設計が「前方に高速ダッシュ」で host RemoteCommander・bot も常に前方へdashするため、client予測も
+    // 前方に揃える。以前は移動wish方向(横/後)に予測しhostは前方で、横/後ダッシュ毎に5〜7m乖離→自機ハードスナップしていた。
+    if (s.key === 'dash') { this.dashT = 0.16; this.dashDir.copy(this.flatForward()).normalize() }
     // オンラインclient: 効果はホスト権威で適用(結果はsnapshot反映)。ローカルはcd/演出のみ(HUD維持)で実効果は抑止。
     if (this.onSkill && this.onSkill()) return
     switch (s.key) {
