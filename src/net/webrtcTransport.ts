@@ -110,7 +110,15 @@ export class WebRtcTransport implements NetTransport {
         if (t.state !== 'open') { t.setState('failed'); t.cleanupPeer(); reject(new Error('timeout')) }
       }, timeoutMs)
       const done = () => { clearTimeout(timer); resolve() }
+      // peer.connect は初回'open'の一度きり。良性のブローカーWS瞬断→peer.reconnect()→WS再オープンで
+      // peer'open'が【再発火】するため、無ガードだと2本目のDataConnection(conn2)を張ってしまう。host側は
+      // conn2を即closeする設計で、その遅延closeが bind()のclose時に this.conn=conn2 を null化+state='closed'
+      // させ、生存中の健全なマッチ(conn1)をクライアント側だけ誤終了させていた(第7監査でclient reconnectを
+      // 対称化した際の回帰)。ラッチで初回のみ接続し、reconnect後の'open'では既存connを維持する。
+      let connectedOnce = false
       peer.on('open', () => {
+        if (connectedOnce) return // reconnect後の'open'再発火: 既存DataChannelを維持し二重connectを抑止
+        connectedOnce = true
         const conn = peer.connect(code, { reliable: true })
         t.bind(conn, done)
       })
