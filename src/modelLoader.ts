@@ -17,6 +17,11 @@ const loader = new GLTFLoader()
 // 最適化済みGLB(meshopt圧縮)を読むためにデコーダを登録
 loader.setMeshoptDecoder(MeshoptDecoder)
 
+// 軽量モード(低スペックGPU向け): char_* を簡略化版 char_*_lod.glb で読む(頂点処理負荷↓)。
+// 既定はoff=フル品質。preloadModels より前に setModelQuality() で設定する。論理キーは同一なので getModel は無改修。
+let lowSpec = false
+export function setModelQuality(low: boolean) { lowSpec = low }
+
 function normalize(scene: THREE.Object3D, targetHeight: number): THREE.Group {
   const box = new THREE.Box3().setFromObject(scene)
   const size = box.getSize(new THREE.Vector3())
@@ -44,16 +49,18 @@ function normalize(scene: THREE.Object3D, targetHeight: number): THREE.Group {
   return root
 }
 
-/** 起動時に呼ぶ。存在しないファイルは静かに無視される */
+/** 起動時に呼ぶ。存在しないファイルは静かに無視される。軽量モード時は char_* を _lod 優先で読み、無ければ通常版へフォールバック */
 export function preloadModels(entries: { key: string; height: number }[]) {
   for (const { key, height } of entries) {
     if (cache.has(key)) continue
-    loader.load(
-      `models/${key}.glb`,
-      (gltf) => cache.set(key, normalize(gltf.scene, height)),
-      undefined,
-      () => cache.set(key, null),
-    )
+    const tryLoad = (url: string, onFail: () => void) =>
+      loader.load(url, (gltf) => cache.set(key, normalize(gltf.scene, height)), undefined, onFail)
+    if (lowSpec && key.startsWith('char_')) {
+      // 簡略化版を試し、無ければ通常版へ(論理キーは同一=getModel無改修・後方互換)
+      tryLoad(`models/${key}_lod.glb`, () => tryLoad(`models/${key}.glb`, () => cache.set(key, null)))
+    } else {
+      tryLoad(`models/${key}.glb`, () => cache.set(key, null))
+    }
   }
 }
 

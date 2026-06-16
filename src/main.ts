@@ -17,7 +17,7 @@ import { BotCommander, botParams } from './bot'
 import { HUD } from './hud'
 import { TOKENS } from './tokens'
 import { buildCore, buildMonsterCommander } from './models'
-import { preloadModels, MODEL_MANIFEST, getModel, animateSkeleton, animateGlbBody } from './modelLoader'
+import { preloadModels, MODEL_MANIFEST, getModel, animateSkeleton, animateGlbBody, setModelQuality } from './modelLoader'
 import { buildSettingsPanel, settings, onSettingsChange } from './settings'
 import { simulateMatch, simulateMatrix, summarize } from './sim'
 import { Objectives, CAPTURE_TO_WIN } from './objectives'
@@ -64,6 +64,7 @@ const input = new Input(renderer.domElement)
 const sfx = new Sfx()
 const bgm = new Bgm()
 bgm.play('title') // 最初のクリックで解禁されるまで保留される
+setModelQuality(settings.lowSpec) // 軽量モードならキャラを簡略化LODで読む(preloadより前に設定)
 preloadModels(MODEL_MANIFEST) // public/models/*.glb があれば自動採用
 
 // 設定(感度・音量)

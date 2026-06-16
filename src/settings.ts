@@ -3,19 +3,21 @@ export interface Settings {
   sens: number // マウス感度倍率 0.3〜2.5
   se: number   // 効果音音量 0〜1
   bgm: number  // BGM音量 0〜1
+  lowSpec: boolean // 軽量モード(低スペックGPU向け。キャラを簡略化LODで描画。次回起動から有効)
 }
 
 const KEY = 'tw-settings'
 
-const DEFAULTS: Settings = { sens: 1.0, se: 1.0, bgm: 1.0 }
+const DEFAULTS: Settings = { sens: 1.0, se: 1.0, bgm: 1.0, lowSpec: false }
 
 export const settings: Settings = { ...DEFAULTS }
 
 try {
   const saved = JSON.parse(localStorage.getItem(KEY) ?? '{}')
-  for (const k of Object.keys(DEFAULTS) as (keyof Settings)[]) {
-    if (typeof saved[k] === 'number' && isFinite(saved[k])) settings[k] = saved[k]
-  }
+  if (typeof saved.sens === 'number' && isFinite(saved.sens)) settings.sens = saved.sens
+  if (typeof saved.se === 'number' && isFinite(saved.se)) settings.se = saved.se
+  if (typeof saved.bgm === 'number' && isFinite(saved.bgm)) settings.bgm = saved.bgm
+  if (typeof saved.lowSpec === 'boolean') settings.lowSpec = saved.lowSpec
 } catch {
   /* 破損時はデフォルト */
 }
@@ -58,23 +60,31 @@ export function buildSettingsPanel(): HTMLElement {
       <input type="range" min="0" max="1" step="0.05" data-key="bgm" />
       <b data-val="bgm"></b>
     </label>
+    <label class="set-row">
+      <span>軽量モード(低スペック機向け・次回起動から有効)</span>
+      <input type="checkbox" data-key="lowSpec" />
+    </label>
   `
   const sync = () => {
     panel.querySelectorAll<HTMLInputElement>('input[data-key]').forEach((inp) => {
       const k = inp.dataset.key as keyof Settings
-      inp.value = String(settings[k])
+      if (inp.type === 'checkbox') inp.checked = !!settings[k]
+      else inp.value = String(settings[k])
     })
     panel.querySelectorAll<HTMLElement>('b[data-val]').forEach((b) => {
-      const k = b.dataset.val as keyof Settings
+      const k = b.dataset.val as 'sens' | 'se' | 'bgm'
       b.textContent = k === 'sens' ? settings[k].toFixed(2) : `${Math.round(settings[k] * 100)}%`
     })
   }
-  panel.addEventListener('input', (e) => {
+  const onChange = (e: Event) => {
     const inp = e.target as HTMLInputElement
     if (!inp.dataset.key) return
-    updateSettings({ [inp.dataset.key]: parseFloat(inp.value) } as Partial<Settings>)
+    const v = inp.type === 'checkbox' ? inp.checked : parseFloat(inp.value)
+    updateSettings({ [inp.dataset.key]: v } as Partial<Settings>)
     sync()
-  })
+  }
+  panel.addEventListener('input', onChange)
+  panel.addEventListener('change', onChange) // checkbox は change でも拾う
   // クリックがポインタロック要求等に伝播しないように
   panel.addEventListener('click', (e) => e.stopPropagation())
   sync()
