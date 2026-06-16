@@ -126,6 +126,7 @@ export class PuppetManager {
     if (!snap || !Array.isArray(snap.units)) return // 不正スナップは丸ごと破棄
     const present = new Set<number>()
     for (const u of snap.units) {
+      if (!u || typeof u !== 'object') continue // 非信頼peer由来: null/非オブジェクト要素は捨てる(isLocal/有限性検証の前にshapeを担保)
       if (this.isLocal(u)) continue
       // 非信頼peer(host)由来の座標を検証: NaN/Infをpuppet行列に入れるとThREEのフラスタムカリングが壊れ画面が凍結する。
       // client→host(input/fire)と同じ「不正フレームは捨てる」方針をstateにも適用(非有限ユニットはスキップ=残留もさせない)。

@@ -722,9 +722,11 @@ class BattleView implements View {
     o.base.red.snapContested = cont ? !!cont[2] : false
     for (const s of o.spheres) s.update(_dt)
     // ミニマップ用: コアと敵将reveal(ソナー)をホスト権威から反映(clientは権威simが無く自前で持てない)。
-    this.clientCores = (Array.isArray(snap.cores) ? snap.cores : []).map((c) => ({ x: c.x, z: c.z, small: c.s }))
-    this.world.revealT.blue = snap.reveal ? snap.reveal[0] : 0 // 敵将(青)reveal=clientが自分のソナーで点滅表示
-    this.world.revealT.red = snap.reveal ? snap.reveal[1] : 0   // 自機(赤)がreveal=被捕捉
+    // 非信頼peer(host)由来: cores/reveal も要素単位で検証(null要素でmap throw、NaNがminimapへ流入するのを防ぐ。score/spheresと一貫)
+    this.clientCores = (Array.isArray(snap.cores) ? snap.cores : []).filter((c) => c && fin(c.x) && fin(c.z)).map((c) => ({ x: c.x, z: c.z, small: !!c.s }))
+    const rv = Array.isArray(snap.reveal) && fin(snap.reveal[0]) && fin(snap.reveal[1]) ? snap.reveal : [0, 0]
+    this.world.revealT.blue = rv[0] // 敵将(青)reveal=clientが自分のソナーで点滅表示
+    this.world.revealT.red = rv[1]   // 自機(赤)がreveal=被捕捉
     const redRevealed = this.world.revealT.red > 0
     if (redRevealed && !this.clientWasRevealed) this.hud.warn('⚠ ソナーで位置を捕捉された!', 2) // ホストのonReveal('red')相当
     this.clientWasRevealed = redRevealed
@@ -745,7 +747,7 @@ class BattleView implements View {
     this.clientSpheresSeen = true
     // 自機(赤将)の権威状態を反映(HP/生存)＋大きくドリフトしたら位置を引き戻す
     // 相手将(青)のHPが下がった=自分が当てた → ヒットマーカー(1v1なのでほぼ自分の戦果。dmgDealt集計も)
-    const opp = snap.units.find((u) => u.kind === 'commander' && u.team === 'blue')
+    const opp = snap.units.find((u) => u && u.kind === 'commander' && u.team === 'blue')
     if (opp && fin(opp.hp)) {
       if (opp.hp < this.lastOppHp && this.lastOppHp < 99999) { this.hud.hitmarker(); sfx.hitmarker(); this.stats.dmgDealt += this.lastOppHp - opp.hp }
       this.lastOppHp = opp.hp
@@ -755,7 +757,7 @@ class BattleView implements View {
       }
       this.clientLastOppAlive = opp.alive
     }
-    const me = snap.units.find((u) => u.kind === 'commander' && u.team === 'red')
+    const me = snap.units.find((u) => u && u.kind === 'commander' && u.team === 'red')
     // 自機将はingestのisLocalスキップで有限性検証されない(puppet化しないため)。ここで明示検証し、
     // 非有限フレームは丸ごとスキップ(直前の健全なpos/hp/maxHpを保持)=NaN座標でcamera/フラスタムが壊れ凍結するのを防ぐ。
     if (me && fin(me.x) && fin(me.z) && fin(me.hp) && fin(me.mhp)) {
@@ -1190,6 +1192,7 @@ function onNetConnected(transport: NetTransport, role: NetRole) {
   let oppMap: string | null = null
   let started = false
   let committedChar: CharacterDef | null = null // ready送信時に確定したキャラ。以降の選択変更に左右されない
+  let lastSentChar: CharacterDef | null = null // 直近のreadyで宣言したキャラ。撤回(committedChar=null)後も保持し、AFK境界レースの自動再合流に使う
   let readyWaitTimer: ReturnType<typeof setTimeout> | undefined // 相手の出撃待ちタイムアウト(AFK時のデッドエンド回避)
   const tryStart = () => {
     if (started || !sentReady || !oppChar || !committedChar) return
@@ -1208,6 +1211,15 @@ function onNetConnected(transport: NetTransport, role: NetRole) {
     if (data.type === 'ready' && typeof data.char === 'string') {
       oppChar = data.char
       oppMap = typeof data.map === 'string' ? data.map : null
+      // AFK境界(30s±1RTT)レース対策: 自分が一度出撃→撤回済み(sentReady=false)でも、相手readyが届いた=相手は出撃済み。
+      // 撤回後にこのreadyが届くと旧来は相手だけ開始し片側フリーズした。宣言済みキャラ(lastSentChar)で自動再合流する
+      // (相手は自分の旧readyで構築するので lastSentChar で揃える=食い違わない)。watchdog はこのreadyすら来ない真のAFK時の最終保険。
+      if (!started && !sentReady && lastSentChar) {
+        sentReady = true
+        committedChar = lastSentChar
+        setOnlineCharLock(true)
+        try { transport.send('event', { type: 'ready', char: committedChar.key, map: pendingMap }) } catch { /* noop */ }
+      }
       tryStart()
     } else if (data.type === 'unready') {
       // 相手がAFKタイムアウト等で出撃を撤回(キャラ選び直し)→こちらが古い宣言キャラで開始しないよう保留に戻す。
@@ -1221,6 +1233,7 @@ function onNetConnected(transport: NetTransport, role: NetRole) {
     if (sentReady) return
     sentReady = true
     committedChar = selectedChar // ここで確定。以降ロスターをロックして変更不能に(宣言キャラ=出撃キャラを保証)
+    lastSentChar = committedChar // 撤回後も宣言キャラを保持(AFK境界レースの自動再合流用)
     setOnlineCharLock(true)
     transport.send('event', { type: 'ready', char: committedChar.key, map: pendingMap })
     tryStart()
@@ -1675,6 +1688,28 @@ window.addEventListener('resize', () => {
     const hostFinishedAtSec = +((host as any).t).toFixed(2)
     host.dispose()
     return { ok: clientRecovered && hostRecovered, clientRecovered, hostRecovered, clientFinishedAtSec, hostFinishedAtSec }
+  },
+  // 非信頼host由来の異常shapeスナップショット耐性検証(第11/14監査): units/cores/score/spheres/reveal に
+  // null要素/非配列/NaN を注入しても client が throw せず(描画フレームを落とさず)、健全フレームで正常復帰するか。
+  // 旧コードは ingest/clientCores.map/find が throw し悪性hostによる client描画DoSが可能だった。
+  netMalformedSnapTest() {
+    const [, c] = LoopbackTransport.pair(0)
+    const client = new BattleView({ charKey: 'mimi', botLevel: 6, practice: false, mapKey: 'skyhaven' }, () => {}, { transport: c, role: 'client', oppCharKey: 'renji' })
+    const bad: any[] = [
+      { score: [1, 2], spheres: [0, 0, 0], timer: 100, units: [null], cores: [null], reveal: [NaN, 0], t: 1 },
+      { score: [1, 2], spheres: [0, 0, 0], timer: 100, units: [42, null, { kind: 'commander', team: 'blue' }], cores: [{ x: NaN, z: 0, s: 0 }], reveal: 'oops', t: 2 },
+      { score: 'x', spheres: null, units: 'nope', cores: 7, t: 3 }, // 配列性すら壊れたフレーム
+    ]
+    let threw = false
+    try {
+      for (const b of bad) { (client as any).lastSnap = b; client.update(1 / 60) }
+      ;(client as any).lastSnap = { score: [3, 4], spheres: [0, 0, 0], timer: 90, units: [], cores: [], reveal: [0, 0], t: 4 } // 健全フレームで復帰
+      client.update(1 / 60)
+    } catch { threw = true }
+    const survived = !threw && !client.over // 例外を出さず、勝手にfinishもしない
+    const recovered = client.scores.blue === 3 && client.scores.red === 4 // 健全フレームは正常反映
+    client.dispose()
+    return { ok: survived && recovered, survived, recovered, threw }
   },
   // PvP遅延/ジッタ耐性検証: 片道latencyMs+片側ジッタjitterMs(到着のバースト化=実DataChannelのhead-of-line)の
   // 決定的ループバックで host→client を回し、競技回線で ①例外/NaNが出ない ②相手将puppetが連続的に動く

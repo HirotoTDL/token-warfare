@@ -57,6 +57,7 @@ export class WebRtcTransport implements NetTransport {
   private conn: DataConnection | null = null
   private msgCb: ((ch: NetChannel, data: any) => void) | null = null
   private stateCb: ((s: NetState) => void) | null = null
+  private rcCancel: (() => void) | null = null // 現役reconnectバックオフの停止関数(破棄時にstale timerを残さない)
 
   private constructor(role: NetRole) {
     this.role = role
@@ -168,15 +169,19 @@ export class WebRtcTransport implements NetTransport {
       clearTimeout(timer)
       timer = setTimeout(() => { if (!gaveUp && this.peer === peer && canRetry()) { try { peer.reconnect() } catch { /* noop */ } } }, delay)
     }
+    const cancel = () => { gaveUp = true; clearTimeout(timer) } // 破棄時に再接続を完全停止(stale setTimeout根絶)
+    this.rcCancel = cancel
     return {
       onDisconnected,
       onOpen: () => { tries = 0; clearTimeout(timer) },
       markFatal: () => { if (gaveUp) return; gaveUp = true; clearTimeout(timer); if (canRetry()) onGiveUp() },
+      cancel,
     }
   }
 
   /** 失敗時にpeer/connを破棄(リーク・ゾンビ接続防止)。state は呼び出し側が設定済み。 */
   private cleanupPeer() {
+    this.rcCancel?.() // 破棄前にreconnectバックオフを止める(destroyの同期'disconnected'再入でstale timerを残さない)
     try { this.conn?.close() } catch { /* noop */ }
     try { this.peer?.destroy() } catch { /* noop */ }
     this.conn = null
@@ -209,21 +214,20 @@ export class WebRtcTransport implements NetTransport {
   }
 
   close(): void {
-    // peer/conn の破棄は state に依らず常に行う(=孤立PeerJS Peer+ブローカーWSのリーク防止)。
-    // 旧実装は state==='closed' で即returnし peer.destroy() に到達せず、相手切断(state='closed')後に
-    // 結果画面から close() を呼んでも Peer/WS が回収されず対戦反復で累積リークしていた。
-    // setState('closed') の再発火(onStateChangeの二重起動)だけ冪等ガードする。
-    const already = this.state === 'closed'
+    // peer/conn の破棄は state に依らず常に行う(=孤立PeerJS Peer+ブローカーWSのリーク防止)。旧実装は
+    // state==='closed' で即returnし peer.destroy() に到達せず、相手切断後の結果画面 close() でPeer/WSが累積リークしていた。
+    // setState は冪等化済なので、conn.close() の同期'close'で先に setState('closed')が走ってもここは二重発火しない。
+    this.rcCancel?.() // 破棄前にreconnectバックオフtimerを止める(destroyの同期'disconnected'再入でstale timerを残さない)
     try { this.conn?.close() } catch { /* noop */ }
     try { this.peer?.destroy() } catch { /* noop */ }
     this.conn = null
     this.peer = null
-    if (!already) this.setState('closed')
+    this.setState('closed')
   }
 
-  /** state に関わらず peer/conn を確実に破棄する(close() の 'closed' 冪等ガードを回避)。
-   *  相手切断で既に state='closed' になった後でも、孤立した PeerJS Peer(ブローカーWS+ICE)を確実に回収するため。 */
+  /** state に関わらず peer/conn を確実に破棄する(相手切断で既に state='closed' でも孤立Peer/WSを確実回収)。 */
   dispose(): void {
+    this.rcCancel?.()
     try { this.conn?.close() } catch { /* noop */ }
     try { this.peer?.destroy() } catch { /* noop */ }
     this.conn = null
@@ -231,6 +235,7 @@ export class WebRtcTransport implements NetTransport {
   }
 
   private setState(s: NetState) {
+    if (this.state === s) return // 同一stateへの再遷移は通知しない=onStateChangeの二重発火(結果画面の二重finish/ロビー誤遷移)を全経路で根絶
     this.state = s
     this.stateCb?.(s)
   }
