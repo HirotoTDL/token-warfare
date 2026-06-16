@@ -361,6 +361,8 @@ class BattleView implements View {
   private inSeq = 0 // client: 入力連番
   private lastSnap: Snapshot | null = null // client: 直近受信スナップ(未適用)
   private netPeerActive = false // online: 相手から入力(host視点)/snapshot(client視点)を一度でも受信したか。開始後一定時間ゼロ=片側開始フリーズ→自動終了
+  pingMs = 0 // client: hostへのRTT推定(EMA)。ackSeq付きsnapshot受信時に now-送信時刻[ackSeq] で更新(改善#2)
+  private inSentT = new Map<number, number>() // client: 送信した入力seq→送信時刻(performance.now)。RTT算出用(ackSeqで引いて消費)
   private lastOppHp = 99999 // client: 相手将の前回HP(被弾→ヒットマーカー判定用)
   private clientLastOppAlive = true // client: 相手将の前回生存(撃破バナー/SE/ヒットストップの立ち上がり検出用)
   private clientCores: { x: number; z: number; small: boolean }[] = [] // client: ミニマップ用コア(snapshot権威)
@@ -707,6 +709,7 @@ class BattleView implements View {
       [o.center.contested(), o.base.blue.contested(), o.base.red.contested()], // 係争状態(クライアントは自前導出不可)
       this.world.cores.map((c) => ({ x: +c.pos.x.toFixed(1), z: +c.pos.z.toFixed(1), s: c.small })), // コア(client minimap用)
       [+this.world.revealT.blue.toFixed(2), +this.world.revealT.red.toFixed(2)], // ソナーreveal残秒(client敵将点滅+被捕捉警告)
+      (this.bot as any)?.lastSeq ?? -1, // 最後に処理したclient入力のseqをエコー→clientがping(RTT)算出(改善#2)
     )
     this.net.transport.send('state', snap)
   }
@@ -714,12 +717,23 @@ class BattleView implements View {
   /** クライアント: 自機入力を送信し、受信スナップショットを反映(権威simは持たない) */
   private clientNetUpdate(_dt: number) {
     if (!this.net || this.over) return // 終了後は入力送信もsnapshot適用も止める(確定スコアが巻き戻らないように)
-    // 1) 自機入力をホストへ(ホストのRemoteCommanderが駆動)
-    this.net.transport.send('input', sampleNetInput(input, this.player.yaw, this.player.pitch, this.inSeq++))
+    // 1) 自機入力をホストへ(ホストのRemoteCommanderが駆動)。送信時刻を記録しping(RTT)算出に使う(改善#2)
+    const seq = this.inSeq++
+    const nowMs = (typeof performance !== 'undefined' ? performance.now() : Date.now())
+    this.inSentT.set(seq, nowMs)
+    if (this.inSentT.size > 128) { for (const k of this.inSentT.keys()) { if (k <= seq - 128) this.inSentT.delete(k); else break } } // 古い送信時刻を間引く
+    this.net.transport.send('input', sampleNetInput(input, this.player.yaw, this.player.pitch, seq))
     // 2) 受信スナップショットを権威として適用
     const snap = this.lastSnap
     if (!snap) return
     this.lastSnap = null
+    // ping(RTT): hostがエコーした ackSeq の送信時刻からRTTを算出しEMA。HUD隅に表示(client視点。hostはRTT計測しないので非表示)
+    if (Number.isFinite(snap.ackSeq) && this.inSentT.has(snap.ackSeq!)) {
+      const rtt = nowMs - this.inSentT.get(snap.ackSeq!)!
+      if (rtt >= 0 && rtt < 5000) this.pingMs = this.pingMs > 0 ? this.pingMs * 0.8 + rtt * 0.2 : rtt
+      for (const k of this.inSentT.keys()) { if (k <= snap.ackSeq!) this.inSentT.delete(k); else break } // 消費済みseqの送信時刻を破棄
+    }
+    this.hud.setNet(this.pingMs, true)
     this.puppets?.ingest(snap) // ingest側でユニット単位の有限性を検証済み
     // 非信頼peer(host)由来のスカラ群も検証: 不正な配列/NaNでスコア/タイマー/スフィアや勝敗判定が壊れないよう、
     // 有限値のときだけ反映する(client→host方向と同じ「不正は捨てる」方針をstateにも適用)。
@@ -1694,9 +1708,13 @@ window.addEventListener('resize', () => {
     let bluePuppetPos: any = null
     let bluePuppetHp: any = null
     for (const [, p] of (pm as any).puppets) { bluePuppetPos = { x: +p.group.position.x.toFixed(1), z: +p.group.position.z.toFixed(1) }; bluePuppetHp = { hp: p.hp, mhp: p.mhp }; break }
+    // ping配線(改善#2): hostがackSeqをエコー→clientがRTT算出。loopbackは遅延0なのでping≈0、ackSeq消費でinSentTが小さく保たれる
+    const pingPlumbed = Number.isFinite((client as any).pingMs) && (client as any).pingMs < 100 && (client as any).inSentT.size < 30
     const r = {
       snapsReceived: snapsSeen,
       clientPuppetCount: puppetCount,
+      pingMs: Math.round((client as any).pingMs),
+      pingPlumbed, // host ackSeq→client RTT算出が機能し消費でinSentTが肥大しない(true期待)
       hostBluePos: { x: 5, z: 10 },
       aBluePuppetPos: bluePuppetPos,
       aBluePuppetHp: bluePuppetHp, // {hp:60, mhp:115}期待(ホストで削ったHPがpuppetに同期)
@@ -1718,7 +1736,7 @@ window.addEventListener('resize', () => {
       clientLossPerspective, // 自陣(赤)視点で敗北ジングルが鳴る=勝敗の音が逆転しない(true期待)
       clientStatsReceived, // matchEndに同梱したclient戦績(撃破/コア)をclientが受領(true期待, 改善#9)
       clientCombatFeedback: { dealt: Math.round(client.stats.dmgDealt), taken: Math.round(client.stats.dmgTaken) }, // 相手被弾→dealt, 自機被弾→taken(両>0期待)
-      ok: snapsSeen > 0 && puppetCount > 0 && clientVisualBolts > 0 && deploySpawnedToken && redTokenBoltRelayed && ownCommanderBoltNotRelayed && skillActivated && clientSphereCaptureFeedback && clientMomentumWhenBehind && clientDeathCountdown && clientRespawnCleared && suddenDeathSynced && matchEndSynced && clientLossPerspective && clientStatsReceived && client.stats.dmgDealt > 0 && client.stats.dmgTaken > 0,
+      ok: snapsSeen > 0 && puppetCount > 0 && clientVisualBolts > 0 && deploySpawnedToken && redTokenBoltRelayed && ownCommanderBoltNotRelayed && skillActivated && clientSphereCaptureFeedback && clientMomentumWhenBehind && clientDeathCountdown && clientRespawnCleared && suddenDeathSynced && matchEndSynced && clientLossPerspective && clientStatsReceived && pingPlumbed && client.stats.dmgDealt > 0 && client.stats.dmgTaken > 0,
     } as any
     // 切断ハンドリング検証: クライアント切断→両者のマッチがover(フリーズしない)
     c.close()

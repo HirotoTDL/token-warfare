@@ -97,12 +97,13 @@ export class HUD {
       <div id="h-tip"></div>
       <div id="h-killbanner"></div>
       <div id="h-minimap-slot"></div>
+      <div id="h-ping" style="position:absolute;top:8px;left:8px;font-size:11px;font-weight:700;letter-spacing:0.3px;padding:2px 7px;border-radius:6px;background:rgba(10,14,24,0.6);color:#7dffd0;display:none;pointer-events:none;">PING --</div>
     `
     const ids = ['h-score-blue', 'h-score-red', 'h-timer', 'h-ot', 'h-warn', 'h-hp', 'h-hp-fill',
       'h-sph-blueBase', 'h-sph-center', 'h-sph-redBase',
       'h-en-fill', 'h-en-label', 'h-en-state', 'h-skill', 'h-skill-cd', 'h-momentum',
       'h-tp-fill', 'h-tp', 'h-slots', 'h-feed', 'h-msg', 'h-crosshair', 'h-hitmarker',
-      'h-vignette', 'h-stealth', 'h-dead', 'h-dead-count', 'h-minimap-slot', 'h-killbanner', 'h-tip']
+      'h-vignette', 'h-stealth', 'h-dead', 'h-dead-count', 'h-minimap-slot', 'h-killbanner', 'h-tip', 'h-ping']
     for (const id of ids) this.els[id] = root.querySelector(`#${id}`) as HTMLElement
     this.els['h-minimap-slot'].appendChild(this.minimap.canvas)
 
@@ -220,6 +221,17 @@ export class HUD {
     el.textContent = text
     el.classList.add('show')
     this.msgTimer = sec
+  }
+
+  /** ネットワーク品質表示(オンライン対戦のping)。show=falseで非表示(オフライン/host計測なし)。色=緑<80/黄<160/赤 */
+  setNet(pingMs: number, show: boolean) {
+    const el = this.els['h-ping']
+    if (!el) return
+    if (!show) { el.style.display = 'none'; return }
+    el.style.display = 'block'
+    const p = Math.round(pingMs)
+    el.textContent = `PING ${p}ms`
+    el.style.color = p < 80 ? '#7dffd0' : p < 160 ? '#ffd23e' : '#ff6a5a'
   }
 
   /** 重要警告(位置捕捉・オーバータイム等) */

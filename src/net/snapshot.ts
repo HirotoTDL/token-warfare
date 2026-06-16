@@ -36,10 +36,11 @@ export interface Snapshot {
   sd?: boolean // サドンデス中か(クライアントのフェーズ告知/HUD表示用。ホスト権威)
   cores?: { x: number; z: number; s: boolean }[] // フィールドコア(クライアントのミニマップ用。s=小コア)。ホスト権威
   reveal?: [number, number] // [blue, red] のソナーreveal残り秒(クライアントの敵将ミニマップ点滅+被捕捉警告用)
+  ackSeq?: number // ホストが最後に処理したclient入力のseq。clientが RTT(ping)= now - 送信時刻[ackSeq] を算出する(改善#2)
 }
 
 /** ホストのworld/objectivesから現在のスナップショットを作る(権威側で毎送信フレーム呼ぶ) */
-export function encodeSnapshot(units: Unit[], spheres: number[], score: [number, number], timer: number, t: number, sd = false, cont: boolean[] = [], cores: { x: number; z: number; s: boolean }[] = [], reveal: [number, number] = [0, 0]): Snapshot {
+export function encodeSnapshot(units: Unit[], spheres: number[], score: [number, number], timer: number, t: number, sd = false, cont: boolean[] = [], cores: { x: number; z: number; s: boolean }[] = [], reveal: [number, number] = [0, 0], ackSeq = -1): Snapshot {
   const us: UnitSnap[] = []
   for (const u of units) {
     if (!u.alive && u.kind === 'commander') {
@@ -68,7 +69,8 @@ export function encodeSnapshot(units: Unit[], spheres: number[], score: [number,
     })
   }
   return { t, units: us, spheres, cont: cont.some((c) => c) ? cont : undefined, score, timer, sd: sd || undefined,
-    cores: cores.length ? cores : undefined, reveal: (reveal[0] > 0 || reveal[1] > 0) ? reveal : undefined }
+    cores: cores.length ? cores : undefined, reveal: (reveal[0] > 0 || reveal[1] > 0) ? reveal : undefined,
+    ackSeq: ackSeq >= 0 ? ackSeq : undefined }
 }
 
 interface Sample {
